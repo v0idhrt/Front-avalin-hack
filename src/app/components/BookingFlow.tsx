@@ -2,6 +2,8 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, Check, Plus, MapPin, Calendar, Users, Navigation, X } from "lucide-react";
 import { Excursion, nearbyActivities } from "./data";
+import { useMe } from "@/app/hooks/useAuth";
+import { useCreateBooking } from "@/app/hooks/useBookings";
 
 interface BookingFlowProps {
   excursion: Excursion;
@@ -11,10 +13,14 @@ interface BookingFlowProps {
 }
 
 export function BookingFlow({ excursion, onBack, onComplete, isDark = true }: BookingFlowProps) {
+  const { data: user } = useMe();
+  const createBookingMutation = useCreateBooking();
+  
   const [step, setStep] = useState(1);
   const [date, setDate] = useState("");
   const [guests, setGuests] = useState(2);
   const [location, setLocation] = useState("");
+  const [detecting, setDetecting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showActivities, setShowActivities] = useState(false);
   const [addedActivities, setAddedActivities] = useState<Set<string>>(new Set());
@@ -27,21 +33,65 @@ export function BookingFlow({ excursion, onBack, onComplete, isDark = true }: Bo
   const cardBorder = isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)";
   const inputText = isDark ? "#fff" : "#222";
   const circleBg = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
-  const bottomGrad = isDark
-    ? "linear-gradient(to top, #0A0A0F 60%, transparent)"
-    : "linear-gradient(to top, #f8f8fc 60%, transparent)";
+  const bottomGrad = isDark ? "linear-gradient(to top, #0A0A0F 60%, transparent)" : "linear-gradient(to top, #f8f8fc 60%, transparent)";
   const overlayBg = isDark ? "rgba(10,10,15,0.95)" : "rgba(248,248,252,0.95)";
   const sheetBg = isDark ? "rgba(20,20,30,0.95)" : "rgba(255,255,255,0.95)";
   const sheetBorder = isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)";
   const divider = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
   const progressBg = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
 
-  const handleConfirm = () => {
-    setShowSuccess(true);
-    setTimeout(() => {
-      setShowSuccess(false);
-      setShowActivities(true);
-    }, 1500);
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Геолокация не поддерживается вашим браузером");
+      return;
+    }
+
+    setDetecting(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        // Эмулируем адрес через координаты
+        setLocation(`Моё местоположение (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`);
+        setDetecting(false);
+      },
+      (error) => {
+        console.error(error);
+        alert("Не удалось определить местоположение. Проверьте разрешения в браузере.");
+        setDetecting(false);
+      },
+      { enableHighAccuracy: true, timeout: 5000 }
+    );
+  };
+
+  const handleConfirm = async () => {
+    if (!user) return;
+    
+    const rawId = excursion.id.toString();
+    const excId = parseInt(rawId.replace("exc", ""));
+
+    try {
+      const isoDate = date ? new Date(date).toISOString() : new Date().toISOString();
+      const cleanPrice = parseFloat(excursion.price?.toString().replace(/[^0-9.]/g, "") || "0");
+
+      await createBookingMutation.mutateAsync({
+        user_id: user.id,
+        excursion_id: excId,
+        selected_date: isoDate,
+        guests_count: guests,
+        pickup_location_text: location,
+        total_price_amount: cleanPrice
+      });
+      
+      setShowSuccess(true);
+      setTimeout(() => {
+        setShowSuccess(false);
+        setShowActivities(true);
+      }, 1500);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.response?.data?.error || "Ошибка при бронировании";
+      console.error("Booking error", err);
+      alert(`Ошибка: ${msg}`);
+    }
   };
 
   const toggleActivity = (id: string) => {
@@ -157,11 +207,21 @@ export function BookingFlow({ excursion, onBack, onComplete, isDark = true }: Bo
 
               <motion.button
                 whileTap={{ scale: 0.97 }}
+                onClick={handleDetectLocation}
+                disabled={detecting}
                 className="w-full flex items-center justify-center gap-2 p-4 rounded-2xl"
                 style={{ background: cardBg, border: cardBorder, color: textSecondary }}
               >
-                <Navigation size={18} />
-                <span style={{ fontSize: 14 }}>Определить автоматически</span>
+                {detecting ? (
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    className="w-4 h-4 border-2 border-orange-500/30 border-t-orange-500 rounded-full"
+                  />
+                ) : (
+                  <Navigation size={18} />
+                )}
+                <span style={{ fontSize: 14 }}>{detecting ? "Определение..." : "Определить автоматически"}</span>
               </motion.button>
 
               {location && (
@@ -215,7 +275,6 @@ export function BookingFlow({ excursion, onBack, onComplete, isDark = true }: Bo
                 </div>
               </div>
 
-              {/* Route button */}
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 className="w-full flex items-center justify-center gap-2 p-4 rounded-2xl"
@@ -243,13 +302,14 @@ export function BookingFlow({ excursion, onBack, onComplete, isDark = true }: Bo
             if (step < 3) setStep(step + 1);
             else handleConfirm();
           }}
+          disabled={createBookingMutation.isPending}
           className="w-full py-4 rounded-2xl text-white"
           style={{
-            background: "linear-gradient(135deg, #FF6B35, #FF8F5E)",
+            background: createBookingMutation.isPending ? "rgba(255,107,53,0.5)" : "linear-gradient(135deg, #FF6B35, #FF8F5E)",
             boxShadow: "0 8px 30px rgba(255,107,53,0.35)",
           }}
         >
-          {step < 3 ? "Далее" : "Подтвердить бронь"}
+          {createBookingMutation.isPending ? "Бронируем..." : (step < 3 ? "Далее" : "Подтвердить бронь")}
         </motion.button>
       </div>
 
@@ -309,7 +369,6 @@ export function BookingFlow({ excursion, onBack, onComplete, isDark = true }: Bo
                   <X size={20} color={textMuted} />
                 </button>
               </div>
-              <p className="mb-5" style={{ fontSize: 14, color: textMuted }}>Места рядом с вашим маршрутом</p>
               <div className="space-y-3">
                 {nearbyActivities.map((act) => (
                   <motion.div
@@ -319,7 +378,6 @@ export function BookingFlow({ excursion, onBack, onComplete, isDark = true }: Bo
                       background: addedActivities.has(act.id) ? "rgba(255,107,53,0.1)" : cardBg,
                       border: addedActivities.has(act.id) ? "1px solid rgba(255,107,53,0.2)" : cardBorder,
                     }}
-                    layout
                   >
                     <div>
                       <p style={{ fontSize: 14, color: textPrimary }}>{act.name}</p>
@@ -341,10 +399,9 @@ export function BookingFlow({ excursion, onBack, onComplete, isDark = true }: Bo
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 onClick={() => { setShowActivities(false); onComplete(); }}
-                className="w-full py-4 rounded-2xl mt-5"
+                className="w-full py-4 rounded-2xl mt-5 text-white"
                 style={{
-                  background: addedActivities.size > 0 ? "linear-gradient(135deg, #FF6B35, #FF8F5E)" : (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)"),
-                  color: addedActivities.size > 0 ? "#fff" : textSecondary,
+                  background: "linear-gradient(135deg, #FF6B35, #FF8F5E)",
                 }}
               >
                 {addedActivities.size > 0 ? `Обновить маршрут (${addedActivities.size})` : "Пропустить"}

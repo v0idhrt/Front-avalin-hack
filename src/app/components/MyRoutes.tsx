@@ -5,439 +5,188 @@ import {
   MapPin,
   Clock,
   Navigation,
+  ChevronRight,
   ExternalLink,
-  ChevronDown,
-  ChevronUp,
-  Route,
-  Star,
   Users,
-  Calendar,
-  Coffee,
-  Camera,
-  Wine,
+  Search,
+  Plus,
 } from "lucide-react";
-import { IMAGES } from "./data";
+import { glass } from "./LiquidBackground";
+import { useMe } from "@/app/hooks/useAuth";
+import { useMyRoutes } from "@/app/hooks/useProfile";
 
 interface MyRoutesProps {
   onBack: () => void;
   isDark?: boolean;
 }
 
-const activityIcons: Record<string, typeof Coffee> = {
-  coffee: Coffee,
-  photo: Camera,
-  wine: Wine,
-};
-
-interface RouteStop {
-  id: string;
-  name: string;
-  time: string;
-  type: "start" | "stop" | "activity" | "end";
-  icon?: string;
-  duration?: string;
+function formatDuration(seconds: number) {
+  if (!seconds) return "—";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
 }
 
-interface UserRoute {
-  id: string;
-  title: string;
-  excursionName: string;
-  image: string;
-  date: string;
-  status: "active" | "upcoming" | "completed";
-  statusLabel: string;
-  from: string;
-  to: string;
-  totalTime: string;
-  totalDistance: string;
-  guests: number;
-  rating?: number;
-  stops: RouteStop[];
-  mapLink: string;
-}
-
-const userRoutes: UserRoute[] = [
-  {
-    id: "r1",
-    title: "Маршрут в Санторини",
-    excursionName: "Закаты Санторини",
-    image: IMAGES.santorini,
-    date: "23 марта 2026, 17:00",
-    status: "active",
-    statusLabel: "Активный",
-    from: "Отель Mystique, Ия",
-    to: "Маяк Акротири",
-    totalTime: "4 ч 30 мин",
-    totalDistance: "18.5 км",
-    guests: 2,
-    stops: [
-      { id: "s1", name: "Отель Mystique", time: "17:00", type: "start" },
-      { id: "s2", name: "Винодельня Santo Wines", time: "17:40", type: "activity", icon: "wine", duration: "45 мин" },
-      { id: "s3", name: "Смотровая площадка Ия", time: "18:45", type: "stop", duration: "30 мин" },
-      { id: "s4", name: "Фотосессия у мельниц", time: "19:30", type: "activity", icon: "photo", duration: "20 мин" },
-      { id: "s5", name: "Маяк Акротири", time: "20:15", type: "end" },
-    ],
-    mapLink: "https://maps.google.com",
-  },
-  {
-    id: "r2",
-    title: "Маршрут по Каппадокии",
-    excursionName: "Воздушные шары Каппадокии",
-    image: IMAGES.cappadocia,
-    date: "28 марта 2026, 05:00",
-    status: "upcoming",
-    statusLabel: "Через 7 дней",
-    from: "Sultan Cave Suites",
-    to: "Долина Любви",
-    totalTime: "3 ч",
-    totalDistance: "12 км",
-    guests: 2,
-    stops: [
-      { id: "s1", name: "Sultan Cave Suites", time: "05:00", type: "start" },
-      { id: "s2", name: "Точка взлёта шаров", time: "05:30", type: "stop", duration: "1.5 ч" },
-      { id: "s3", name: "Кафе с видом", time: "07:30", type: "activity", icon: "coffee", duration: "30 мин" },
-      { id: "s4", name: "Долина Любви", time: "08:00", type: "end" },
-    ],
-    mapLink: "https://maps.google.com",
-  },
-  {
-    id: "r3",
-    title: "Маршрут по Бали",
-    excursionName: "Рисовые террасы Бали",
-    image: IMAGES.bali,
-    date: "10 февраля 2026, 08:00",
-    status: "completed",
-    statusLabel: "Завершён",
-    from: "Ubud Royal Palace",
-    to: "Tegallalang Rice Terrace",
-    totalTime: "6 ч",
-    totalDistance: "24 км",
-    guests: 3,
-    rating: 5,
-    stops: [
-      { id: "s1", name: "Ubud Royal Palace", time: "08:00", type: "start" },
-      { id: "s2", name: "Tegallalang Rice Terrace", time: "09:00", type: "stop", duration: "2 ч" },
-      { id: "s3", name: "Кофейная плантация", time: "11:30", type: "activity", icon: "coffee", duration: "1 ч" },
-      { id: "s4", name: "Храм Tirta Empul", time: "13:00", type: "end" },
-    ],
-    mapLink: "https://maps.google.com",
-  },
-];
-
-const statusColors = {
-  active: {
-    bg: "rgba(52,211,153,0.08)",
-    border: "rgba(52,211,153,0.2)",
-    text: "#34D399",
-    dot: "#34D399",
-  },
-  upcoming: {
-    bg: "rgba(255,107,53,0.08)",
-    border: "rgba(255,107,53,0.2)",
-    text: "#FF8F5E",
-    dot: "#FF8F5E",
-  },
-  completed: {
-    bgDark: "rgba(255,255,255,0.04)",
-    bgLight: "rgba(0,0,0,0.03)",
-    borderDark: "rgba(255,255,255,0.08)",
-    borderLight: "rgba(0,0,0,0.06)",
-    textDark: "rgba(255,255,255,0.35)",
-    textLight: "rgba(0,0,0,0.3)",
-    dotDark: "rgba(255,255,255,0.25)",
-    dotLight: "rgba(0,0,0,0.2)",
-  },
-};
-
-function getStatusStyle(status: string, isDark: boolean) {
-  if (status === "completed") {
-    const c = statusColors.completed;
-    return {
-      bg: isDark ? c.bgDark : c.bgLight,
-      border: isDark ? c.borderDark : c.borderLight,
-      text: isDark ? c.textDark : c.textLight,
-      dot: isDark ? c.dotDark : c.dotLight,
-    };
-  }
-  return statusColors[status as "active" | "upcoming"];
+function formatDistance(meters: number) {
+  if (!meters) return "—";
+  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} км` : `${meters} м`;
 }
 
 export function MyRoutes({ onBack, isDark = true }: MyRoutesProps) {
-  const [expandedRoute, setExpandedRoute] = useState<string | null>("r1");
-  const [activeFilter, setActiveFilter] = useState<"all" | "active" | "upcoming" | "completed">("all");
+  const { data: user } = useMe();
+  const { data: routes, isLoading } = useMyRoutes(user?.id);
+  const [search, setSearch] = useState("");
+  const [selectedRoute, setSelectedRoute] = useState<any>(null);
 
-  const bg = isDark ? "#0A0A0F" : "#f8f8fc";
   const textPrimary = isDark ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.9)";
-  const textSecondary = isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.45)";
-  const textMuted = isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.35)";
-  const textFaint = isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.2)";
-  const cardBg = isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)";
-  const chipBg = isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)";
-  const chipBorder = isDark ? "1px solid rgba(255,255,255,0.06)" : "1px solid rgba(0,0,0,0.06)";
-  const chipText = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.4)";
-  const divider = isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)";
-  const iconColor = isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)";
-  const timelineColor = isDark
-    ? "linear-gradient(to bottom, rgba(255,255,255,0.1), rgba(255,255,255,0.03))"
-    : "linear-gradient(to bottom, rgba(0,0,0,0.1), rgba(0,0,0,0.03))";
+  const textSecondary = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.45)";
+  const iconColor = isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.6)";
 
-  const filters = [
-    { id: "all" as const, label: "Все" },
-    { id: "active" as const, label: "Активные" },
-    { id: "upcoming" as const, label: "Будущие" },
-    { id: "completed" as const, label: "Завершённые" },
-  ];
+  const glassItem = isDark ? glass.panelLight(0.04, 30) : {
+    background: "rgba(255,255,255,0.45)",
+    backdropFilter: "blur(30px) saturate(160%)",
+    WebkitBackdropFilter: "blur(30px) saturate(160%)",
+    border: "1px solid rgba(255,255,255,0.55)",
+    boxShadow: "0 4px 16px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.7)",
+  };
 
-  const filtered = activeFilter === "all" ? userRoutes : userRoutes.filter((r) => r.status === activeFilter);
+  const filteredRoutes = routes?.filter(r => r.title.toLowerCase().includes(search.toLowerCase()));
+
+  const cardBg = isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)";
+  const cardBorder = isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)";
 
   return (
-    <div className="h-full overflow-y-auto pb-28 pt-12" style={{ scrollbarWidth: "none", background: bg }}>
+    <>
+    <div className="h-full overflow-y-auto" style={{ scrollbarWidth: "none" }}>
       {/* Header */}
-      <div className="flex items-center gap-4 px-5 mb-5">
-        <motion.button onClick={onBack} whileTap={{ scale: 0.85 }}>
-          <ArrowLeft size={24} color={isDark ? "#fff" : "#222"} />
-        </motion.button>
-        <div className="flex-1">
-          <h1 style={{ color: textPrimary }}>Мои маршруты</h1>
-        </div>
-        <div
-          className="w-10 h-10 rounded-full flex items-center justify-center"
-          style={{ background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
-        >
-          <Route size={18} color={iconColor} />
-        </div>
+      <div className="sticky top-0 z-30 flex items-center gap-4 px-4 pt-14 pb-4" style={{
+        ...(isDark ? { ...glass.panel(0.05, 50), borderRadius: 0, borderTop: "none", borderLeft: "none", borderRight: "none", borderBottom: "1px solid rgba(255,255,255,0.08)" }
+        : { background: "rgba(255,255,255,0.65)", backdropFilter: "blur(50px) saturate(180%)", borderBottom: "1px solid rgba(0,0,0,0.06)" }),
+      }}>
+        <motion.button whileTap={{ scale: 0.8 }} onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center" style={glass.panelLight(isDark ? 0.08 : 0.4, 20)}><ArrowLeft size={18} color={iconColor} /></motion.button>
+        <span style={{ fontSize: 18, color: textPrimary }}>Мои маршруты</span>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex gap-2 px-5 mb-6 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-        {filters.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setActiveFilter(f.id)}
-            className="px-4 py-2 rounded-full whitespace-nowrap transition-all"
-            style={{
-              background: activeFilter === f.id ? "linear-gradient(135deg, #FF6B35, #FF8F5E)" : chipBg,
-              color: activeFilter === f.id ? "#fff" : chipText,
-              border: activeFilter === f.id ? "none" : chipBorder,
-              fontSize: 14,
-            }}
-          >
-            {f.label}
-          </button>
+      <div className="px-5 py-4 space-y-4">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2" size={18} color={textSecondary} />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Поиск по маршрутам..."
+            className="w-full pl-11 pr-4 py-3 rounded-2xl outline-none transition-all"
+            style={{ background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: textPrimary }}
+          />
+        </div>
+
+        {isLoading && (
+          <div className="flex justify-center py-10">
+            <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="w-6 h-6 border-2 border-orange-500/30 border-t-orange-500 rounded-full" />
+          </div>
+        )}
+
+        {!isLoading && (!filteredRoutes || filteredRoutes.length === 0) && (
+          <div className="text-center py-10">
+            <p style={{ color: textSecondary }}>Маршруты не найдены</p>
+          </div>
+        )}
+
+        {filteredRoutes?.map((route, i) => (
+          <motion.div key={route.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="p-4 rounded-2xl relative overflow-hidden" style={glassItem}>
+            <div className="flex justify-between items-start mb-3">
+              <div>
+                <h3 style={{ color: textPrimary, fontSize: 16 }}>{route.title}</h3>
+                <p style={{ color: textSecondary, fontSize: 13, marginTop: 2 }}>Создан: {new Date().toLocaleDateString("ru-RU")}</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "rgba(255,107,53,0.12)" }}>
+                <Navigation size={18} color="#FF8F5E" />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <motion.button whileTap={{ scale: 0.96 }} onClick={() => setSelectedRoute(route)} className="flex-1 py-2 rounded-xl text-sm" style={{ background: "rgba(255,255,255,0.05)", color: textPrimary, border: "1px solid rgba(255,255,255,0.08)" }}>Детали</motion.button>
+              <motion.button whileTap={{ scale: 0.96 }} onClick={() => route.external_map_url && window.open(route.external_map_url, "_blank")} className="flex-1 py-2 rounded-xl text-sm text-white" style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)", opacity: route.external_map_url ? 1 : 0.5 }}>Открыть карту</motion.button>
+            </div>
+          </motion.div>
         ))}
+
+        {/* Create new */}
+        <motion.button whileTap={{ scale: 0.98 }} className="w-full py-4 rounded-2xl flex items-center justify-center gap-2" style={{ border: "2px dashed rgba(255,255,255,0.1)", color: textSecondary }}>
+          <Plus size={18} />
+          <span>Создать новый маршрут</span>
+        </motion.button>
       </div>
-
-      {/* Routes */}
-      <div className="px-5 space-y-4">
-        {filtered.map((route, i) => {
-          const isExpanded = expandedRoute === route.id;
-          const sc = getStatusStyle(route.status, isDark);
-
-          return (
-            <motion.div
-              key={route.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06 }}
-              className="rounded-3xl overflow-hidden"
-              style={{ background: cardBg, border: `1px solid ${sc.border}` }}
-            >
-              {/* Card header with image */}
-              <div className="relative h-40">
-                <img src={route.image} alt={route.title} className="w-full h-full object-cover" />
-                <div
-                  className="absolute inset-0"
-                  style={{ background: "linear-gradient(to top, rgba(10,10,15,0.95) 0%, rgba(10,10,15,0.3) 50%, transparent 100%)" }}
-                />
-                {/* Status badge */}
-                <div
-                  className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full"
-                  style={{ background: sc.bg, border: `1px solid ${sc.border}` }}
-                >
-                  <div className="w-2 h-2 rounded-full" style={{ background: sc.dot }} />
-                  <span style={{ fontSize: 12, color: sc.text }}>{route.statusLabel}</span>
-                </div>
-                {/* Rating for completed */}
-                {route.rating && (
-                  <div
-                    className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-1.5 rounded-full"
-                    style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(10px)" }}
-                  >
-                    <Star size={12} fill="#FFB800" color="#FFB800" />
-                    <span className="text-white" style={{ fontSize: 12 }}>{route.rating}</span>
-                  </div>
-                )}
-                {/* Bottom info on image */}
-                <div className="absolute bottom-3 left-3 right-3">
-                  <p className="text-white mb-0.5" style={{ fontSize: 16 }}>{route.title}</p>
-                  <p className="text-white/40" style={{ fontSize: 13 }}>{route.excursionName}</p>
-                </div>
-              </div>
-
-              {/* Info row */}
-              <div className="px-4 py-3 flex items-center gap-3 flex-wrap" style={{ borderBottom: `1px solid ${divider}` }}>
-                <div className="flex items-center gap-1.5">
-                  <Calendar size={13} color={textFaint} />
-                  <span style={{ fontSize: 13, color: textSecondary }}>{route.date}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Users size={13} color={textFaint} />
-                  <span style={{ fontSize: 13, color: textSecondary }}>{route.guests} чел.</span>
-                </div>
-              </div>
-
-              {/* Route summary */}
-              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${divider}` }}>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="w-2 h-2 rounded-full" style={{ background: "#34D399" }} />
-                    <span className="truncate" style={{ fontSize: 13, color: textSecondary }}>{route.from}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ background: "#FF6B35" }} />
-                    <span className="truncate" style={{ fontSize: 13, color: textSecondary }}>{route.to}</span>
-                  </div>
-                </div>
-                <div className="text-right flex-shrink-0 ml-3">
-                  <p style={{ fontSize: 13, color: isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.6)" }}>{route.totalDistance}</p>
-                  <p style={{ fontSize: 12, color: textFaint }}>{route.totalTime}</p>
-                </div>
-              </div>
-
-              {/* Expand/Collapse toggle */}
-              <button
-                onClick={() => setExpandedRoute(isExpanded ? null : route.id)}
-                className="w-full flex items-center justify-center gap-2 py-3 transition-colors"
-              >
-                <span style={{ fontSize: 13, color: textFaint }}>
-                  {isExpanded ? "Свернуть маршрут" : "Подробный маршрут"}
-                </span>
-                {isExpanded ? (
-                  <ChevronUp size={16} color={textFaint} />
-                ) : (
-                  <ChevronDown size={16} color={textFaint} />
-                )}
-              </button>
-
-              {/* Expanded timeline */}
-              <AnimatePresence>
-                {isExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3, ease: "easeInOut" }}
-                    className="overflow-hidden"
-                  >
-                    <div className="px-4 pb-4" style={{ borderTop: `1px solid ${divider}` }}>
-                      {/* Timeline */}
-                      <div className="pt-4 space-y-0">
-                        {route.stops.map((stop, si) => {
-                          const isFirst = si === 0;
-                          const isLast = si === route.stops.length - 1;
-                          const ActivityIcon = stop.icon ? activityIcons[stop.icon] : MapPin;
-
-                          return (
-                            <div key={stop.id} className="flex gap-3">
-                              {/* Timeline line */}
-                              <div className="flex flex-col items-center" style={{ width: 28 }}>
-                                <div
-                                  className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
-                                  style={{
-                                    background: isFirst
-                                      ? "rgba(52,211,153,0.15)"
-                                      : isLast
-                                      ? "rgba(255,107,53,0.15)"
-                                      : stop.type === "activity"
-                                      ? "rgba(139,92,246,0.15)"
-                                      : isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
-                                    border: `1px solid ${
-                                      isFirst
-                                        ? "rgba(52,211,153,0.3)"
-                                        : isLast
-                                        ? "rgba(255,107,53,0.3)"
-                                        : stop.type === "activity"
-                                        ? "rgba(139,92,246,0.3)"
-                                        : isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)"
-                                    }`,
-                                  }}
-                                >
-                                  {isFirst ? (
-                                    <Navigation size={12} color="#34D399" />
-                                  ) : isLast ? (
-                                    <MapPin size={12} color="#FF6B35" />
-                                  ) : (
-                                    <ActivityIcon
-                                      size={12}
-                                      color={stop.type === "activity" ? "#8B5CF6" : textMuted}
-                                    />
-                                  )}
-                                </div>
-                                {!isLast && (
-                                  <div
-                                    className="w-px flex-1 my-1"
-                                    style={{ minHeight: 24, background: timelineColor }}
-                                  />
-                                )}
-                              </div>
-
-                              {/* Stop info */}
-                              <div className="pb-4 flex-1">
-                                <div className="flex items-center justify-between">
-                                  <p style={{ fontSize: 14, color: isDark ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.7)" }}>{stop.name}</p>
-                                  <span className="flex-shrink-0 ml-2" style={{ fontSize: 12, color: textFaint }}>{stop.time}</span>
-                                </div>
-                                {stop.duration && (
-                                  <div className="flex items-center gap-1 mt-1">
-                                    <Clock size={11} color={isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.2)"} />
-                                    <span style={{ fontSize: 12, color: isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.2)" }}>{stop.duration}</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Open in maps button */}
-                      <motion.button
-                        whileTap={{ scale: 0.97 }}
-                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl mt-2"
-                        style={{
-                          background: route.status === "active"
-                            ? "linear-gradient(135deg, #FF6B35, #FF8F5E)"
-                            : isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
-                          boxShadow: route.status === "active" ? "0 6px 24px rgba(255,107,53,0.25)" : "none",
-                        }}
-                      >
-                        <ExternalLink size={16} color={route.status === "active" ? "#fff" : textMuted} />
-                        <span
-                          style={{
-                            fontSize: 14,
-                            color: route.status === "active" ? "#fff" : textMuted,
-                          }}
-                        >
-                          {route.status === "active" ? "Открыть маршрут" : "Посмотреть на карте"}
-                        </span>
-                      </motion.button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* Empty state */}
-      {filtered.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 px-10">
-          <Route size={48} color={isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"} />
-          <p className="mt-4 text-center" style={{ fontSize: 15, color: textFaint }}>
-            Нет маршрутов в этой категории
-          </p>
-        </div>
-      )}
     </div>
+
+    <AnimatePresence>
+      {selectedRoute && (
+        <>
+          <motion.div className="fixed inset-0 z-[60]" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)" }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setSelectedRoute(null)}
+          />
+          <motion.div className="fixed inset-x-0 bottom-0 z-[61] rounded-t-3xl p-5"
+            style={{ background: isDark ? "rgba(12,12,20,0.98)" : "rgba(255,255,255,0.98)" }}
+            initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 30, stiffness: 300 }}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h3 style={{ color: textPrimary, fontSize: 18 }}>{selectedRoute.title}</h3>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => setSelectedRoute(null)} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: cardBg }}>
+                <ExternalLink size={14} color={textSecondary} style={{ display: "none" }} />
+                <span style={{ color: textSecondary, fontSize: 18, lineHeight: 1 }}>×</span>
+              </motion.button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: cardBg, border: cardBorder }}>
+                <MapPin size={18} color="#FF8F5E" />
+                <div>
+                  <p style={{ fontSize: 12, color: textSecondary }}>Начало маршрута</p>
+                  <p style={{ fontSize: 15, color: textPrimary }}>{selectedRoute.start_location_text || "Не указано"}</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1 flex items-center gap-3 p-4 rounded-2xl" style={{ background: cardBg, border: cardBorder }}>
+                  <Navigation size={18} color="#FF8F5E" />
+                  <div>
+                    <p style={{ fontSize: 12, color: textSecondary }}>Расстояние</p>
+                    <p style={{ fontSize: 15, color: textPrimary }}>{formatDistance(selectedRoute.distance_meters)}</p>
+                  </div>
+                </div>
+                <div className="flex-1 flex items-center gap-3 p-4 rounded-2xl" style={{ background: cardBg, border: cardBorder }}>
+                  <Clock size={18} color="#FF8F5E" />
+                  <div>
+                    <p style={{ fontSize: 12, color: textSecondary }}>Время</p>
+                    <p style={{ fontSize: 15, color: textPrimary }}>{formatDuration(selectedRoute.duration_seconds)}</p>
+                  </div>
+                </div>
+              </div>
+              {selectedRoute.route_provider && (
+                <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: cardBg, border: cardBorder }}>
+                  <Users size={18} color="#FF8F5E" />
+                  <div>
+                    <p style={{ fontSize: 12, color: textSecondary }}>Провайдер</p>
+                    <p style={{ fontSize: 15, color: textPrimary }}>{selectedRoute.route_provider}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {selectedRoute.external_map_url && (
+              <motion.button whileTap={{ scale: 0.97 }} onClick={() => window.open(selectedRoute.external_map_url, "_blank")}
+                className="w-full py-4 rounded-2xl text-white flex items-center justify-center gap-2 mt-4"
+                style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)" }}
+              >
+                <ExternalLink size={16} />
+                Открыть карту
+              </motion.button>
+            )}
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+    </>
   );
 }

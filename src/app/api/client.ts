@@ -4,8 +4,8 @@ import axios, {
   type AxiosRequestConfig,
 } from "axios";
 
-/** База для всех запросов: `VITE_API_URL` или `/api` (удобно под dev-proxy в Vite) */
-export const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
+/** База для всех запросов: `VITE_API_URL` или `/api` */
+export const API_BASE_URL = (import.meta.env.VITE_API_URL ?? "") + "/api/v1";
 
 /** Единственный экземпляр axios для приложения */
 export const api: AxiosInstance = axios.create({
@@ -32,8 +32,17 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+function httpsifyUrls(obj: unknown): unknown {
+  if (typeof obj === "string") return obj.replace(/^http:\/\//i, "https://");
+  if (Array.isArray(obj)) return obj.map(httpsifyUrls);
+  if (obj && typeof obj === "object") {
+    return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, httpsifyUrls(v)]));
+  }
+  return obj;
+}
+
 api.interceptors.response.use(
-  (response) => response,
+  (response) => { response.data = httpsifyUrls(response.data); return response; },
   (error: AxiosError) => Promise.reject(error)
 );
 

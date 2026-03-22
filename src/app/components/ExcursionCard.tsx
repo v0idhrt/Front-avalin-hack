@@ -1,13 +1,14 @@
 import { useState, useRef } from "react";
 import { motion, useScroll, useTransform, AnimatePresence } from "motion/react";
 import { Star, ArrowLeft, Clock, MapPin, Share2, GitCompareArrows, Plus, ChevronDown, X } from "lucide-react";
-import { Excursion, reviews, excursions } from "./data";
+import { Excursion, reviews, excursions as mockExcursions, IMAGES } from "./data";
+import { useExcursions } from "@/app/hooks/useContent";
 
 interface ExcursionCardProps {
   excursion: Excursion;
   onBack: () => void;
   onBook: (exc: Excursion) => void;
-  onSimilarClick: (exc: Excursion) => void;
+  onSimilarClick?: (exc: Excursion) => void;
   isDark?: boolean;
 }
 
@@ -23,8 +24,12 @@ export function ExcursionCard({ excursion, onBack, onBook, onSimilarClick, isDar
   const [showPicker, setShowPicker] = useState(false);
   const [compared, setCompared] = useState(false);
 
-  const similar = excursions.filter((e) => e.category === excursion.category && e.id !== excursion.id).slice(0, 4);
-  const otherExcursions = excursions.filter((e) => e.id !== excursion.id);
+  const { data: apiExcursions } = useExcursions();
+  const allExcursions = apiExcursions ?? mockExcursions;
+  const excId = excursion.id ?? excursion.id;
+
+  const similar = allExcursions.filter((e: any) => e.category === excursion.category && e.id !== excId).slice(0, 4);
+  const otherExcursions = allExcursions.filter((e: any) => e.id !== excId);
 
   const bg = isDark ? "#0A0A0F" : "#f8f8fc";
   const textPrimary = isDark ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.9)";
@@ -96,7 +101,7 @@ export function ExcursionCard({ excursion, onBack, onBook, onSimilarClick, isDar
         {/* Hero image with parallax */}
         <div className="relative h-[55vh] overflow-hidden">
           <motion.img
-            src={excursion.image}
+            src={excursion.cover_image_url || excursion.image}
             alt={excursion.title}
             className="w-full h-full object-cover"
             style={{ y: imgY, scale: imgScale }}
@@ -280,7 +285,7 @@ export function ExcursionCard({ excursion, onBack, onBook, onSimilarClick, isDar
                 <div className="flex gap-3 mb-5">
                   {/* Current excursion */}
                   <div className="flex-1 rounded-2xl overflow-hidden" style={{ background: cardBg, border: cardBorder }}>
-                    <img src={excursion.image} alt="" className="w-full h-24 object-cover" />
+                    <img src={excursion.cover_image_url || excursion.image} alt="" className="w-full h-24 object-cover" />
                     <div className="p-3">
                       <p className="truncate" style={{ fontSize: 13, color: textPrimary }}>{excursion.title}</p>
                       <p style={{ fontSize: 11, color: textMuted }}>{excursion.location}</p>
@@ -303,15 +308,15 @@ export function ExcursionCard({ excursion, onBack, onBook, onSimilarClick, isDar
                       >
                         <X size={12} color="#fff" />
                       </motion.button>
-                      <img src={compareExcursion.image} alt="" className="w-full h-24 object-cover" />
+                      <img src={(compareExcursion as any).cover_image_url || compareExcursion.image || IMAGES.sochi} alt="" className="w-full h-24 object-cover" />
                       <div className="p-3">
                         <p className="truncate" style={{ fontSize: 13, color: textPrimary }}>{compareExcursion.title}</p>
-                        <p style={{ fontSize: 11, color: textMuted }}>{compareExcursion.location}</p>
+                        <p style={{ fontSize: 11, color: textMuted }}>{(compareExcursion as any).location || (compareExcursion as any).category}</p>
                         <div className="flex items-center gap-1 mt-1.5">
                           <Star size={10} fill="#FFB800" color="#FFB800" />
-                          <span style={{ fontSize: 12, color: textSecondary }}>{compareExcursion.rating}</span>
+                          <span style={{ fontSize: 12, color: textSecondary }}>{(compareExcursion as any).rating_avg ?? compareExcursion.rating}</span>
                         </div>
-                        <p style={{ fontSize: 14, color: "#FF6B35" }} className="mt-1">{compareExcursion.price}</p>
+                        <p style={{ fontSize: 14, color: "#FF6B35" }} className="mt-1">{(compareExcursion as any).price_amount != null ? `₽${(compareExcursion as any).price_amount}` : compareExcursion.price}</p>
                       </div>
                     </div>
                   ) : (
@@ -364,7 +369,7 @@ export function ExcursionCard({ excursion, onBack, onBook, onSimilarClick, isDar
                       </motion.button>
                     </div>
                     <div className="space-y-2 max-h-60 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
-                      {otherExcursions.map((exc) => (
+                      {otherExcursions.map((exc: any) => (
                         <motion.button
                           key={exc.id}
                           whileTap={{ scale: 0.97 }}
@@ -372,14 +377,16 @@ export function ExcursionCard({ excursion, onBack, onBook, onSimilarClick, isDar
                           style={{ background: cardBg, border: cardBorder }}
                           onClick={() => { setCompareExcursion(exc); setShowPicker(false); setCompared(false); }}
                         >
-                          <img src={exc.image} alt="" className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+                          <img src={exc.cover_image_url || exc.image || IMAGES.sochi} alt="" className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
                           <div className="flex-1 min-w-0">
                             <p className="truncate" style={{ fontSize: 13, color: textPrimary }}>{exc.title}</p>
-                            <p style={{ fontSize: 11, color: textMuted }}>{exc.location}</p>
+                            <p style={{ fontSize: 11, color: textMuted }}>{exc.location || exc.short_description || exc.category}</p>
                             <div className="flex items-center gap-2 mt-1">
-                              <span style={{ fontSize: 12, color: "#FF6B35" }}>{exc.price}</span>
-                              <span style={{ fontSize: 11, color: textMuted }}>·</span>
-                              <span style={{ fontSize: 11, color: textMuted }}>{exc.duration}</span>
+                              <span style={{ fontSize: 12, color: "#FF6B35" }}>{exc.price_amount != null ? `₽${exc.price_amount}` : exc.price}</span>
+                              {(exc.duration || exc.duration_minutes) && <>
+                                <span style={{ fontSize: 11, color: textMuted }}>·</span>
+                                <span style={{ fontSize: 11, color: textMuted }}>{exc.duration || `${exc.duration_minutes} мин`}</span>
+                              </>}
                             </div>
                           </div>
                         </motion.button>

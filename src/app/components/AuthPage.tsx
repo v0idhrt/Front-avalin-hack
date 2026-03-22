@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Eye, EyeOff, ArrowRight, Mountain } from "lucide-react";
+import { Eye, EyeOff, ArrowRight } from "lucide-react";
+import { useLogin, useRegister, getApiErrorMessage } from "@/app/hooks/useAuth";
 
 interface AuthPageProps {
   onLogin: (role: "user" | "organizer", organizerId?: string) => void;
@@ -9,12 +10,47 @@ interface AuthPageProps {
 
 export function AuthPage({ onLogin, isDark = true }: AuthPageProps) {
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [role, setRole] = useState<"user" | "organizer">("user");
-  const [login, setLogin] = useState("");
+  const [role, setRole] = useState<"tourist" | "vendor">("tourist");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+
+  const loginMutation = useLogin();
+  const registerMutation = useRegister();
+
+  const loading = loginMutation.isPending || registerMutation.isPending;
+
+  const handleSubmit = async () => {
+    setError("");
+    
+    if (!email.trim() || !password.trim()) {
+      setError("Заполните все поля");
+      return;
+    }
+
+    try {
+      if (mode === "login") {
+        const result = await loginMutation.mutateAsync({ 
+          email, 
+          password 
+        });
+        // Map backend role back to UI expectations
+        const uiRole = result.user.role === "vendor" ? "organizer" : "user";
+        onLogin(uiRole, result.user.organizerId);
+      } else {
+        const result = await registerMutation.mutateAsync({
+          email,
+          password,
+          role
+        });
+        const uiRole = result.user.role === "vendor" ? "organizer" : "user";
+        onLogin(uiRole, result.user.organizerId);
+      }
+    } catch (err) {
+      setError(getApiErrorMessage(err));
+    }
+  };
 
   const bg = isDark ? "#0A0A0F" : "#f8f8fc";
   const textPrimary = isDark ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.9)";
@@ -25,26 +61,8 @@ export function AuthPage({ onLogin, isDark = true }: AuthPageProps) {
   const inputBg = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)";
   const inputBorder = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)";
 
-  const handleSubmit = () => {
-    if (!login.trim() || !password.trim()) {
-      setError("Заполните все поля");
-      return;
-    }
-    if (password.length < 4) {
-      setError("Пароль минимум 4 символа");
-      return;
-    }
-    setError("");
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      // For organizer login, map to org3 (Кубань-Тур) as demo
-      onLogin(role, role === "organizer" ? "org3" : undefined);
-    }, 800);
-  };
-
   return (
-    <div className="h-full relative flex flex-col" style={{ background: bg }}>
+    <div className="flex-1 relative flex flex-col" style={{ background: bg }}>
       {/* Top decorative gradient */}
       <div
         className="absolute top-0 left-0 right-0 h-72 pointer-events-none"
@@ -68,36 +86,79 @@ export function AuthPage({ onLogin, isDark = true }: AuthPageProps) {
         </motion.div>
 
         {/* Role toggle */}
-        <motion.div
-          className="flex gap-2 mb-6 p-1 rounded-2xl"
-          style={{ background: cardBg, border: cardBorder }}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-        >
-          <button
-            onClick={() => setRole("user")}
-            className="flex-1 py-3 rounded-xl transition-all"
-            style={{
-              background: role === "user" ? "linear-gradient(135deg, #FF6B35, #FF8F5E)" : "transparent",
-              color: role === "user" ? "#fff" : textSecondary,
-              fontSize: 14,
-            }}
-          >
-            Путешественник
-          </button>
-          <button
-            onClick={() => setRole("organizer")}
-            className="flex-1 py-3 rounded-xl transition-all"
-            style={{
-              background: role === "organizer" ? "linear-gradient(135deg, #FF6B35, #FF8F5E)" : "transparent",
-              color: role === "organizer" ? "#fff" : textSecondary,
-              fontSize: 14,
-            }}
-          >
-            Организатор
-          </button>
-        </motion.div>
+        <div className="relative mb-6 p-1 rounded-2xl" style={{ 
+          background: cardBg, 
+          border: cardBorder,
+        }}>
+          <div className="relative h-[40px] p-1">
+            {/* Main Liquid Pill */}
+            <motion.div
+              className="absolute top-0 left-0 bottom-0 z-0"
+              initial={false}
+              animate={{
+                x: role === "tourist" ? "0%" : "100%",
+              }}
+              transition={{
+                type: "spring",
+                stiffness: 400,
+                damping: 35,
+                mass: 0.8,
+              }}
+              style={{
+                width: "50%",
+              }}
+            >
+              <div className="p-1 h-full w-full">
+                {/* Internal stretch container */}
+                <motion.div 
+                  className="w-full h-full rounded-xl overflow-hidden relative"
+                  style={{
+                    background: "linear-gradient(135deg, #FF6B35, #FF8F5E)",
+                    border: "1px solid rgba(255,255,255,0.2)",
+                  }}
+                  animate={{
+                    scaleX: [1, 1.15, 1],
+                    scaleY: [1, 0.9, 1],
+                  }}
+                  transition={{ duration: 0.4, ease: "circOut" }}
+                  key={role}
+                >
+                  <motion.div 
+                    className="absolute inset-0 w-1/2 h-full bg-white/20 blur-xl -skew-x-12"
+                    animate={{ left: ["-100%", "200%"] }}
+                    transition={{ duration: 0.6, ease: "easeInOut" }}
+                    key={`sweep-${role}`}
+                  />
+                </motion.div>
+              </div>
+            </motion.div>
+
+            <div className="relative z-10 flex h-full items-center">
+              <button
+                onClick={() => setRole("tourist")}
+                className="flex-1 h-full flex items-center justify-center transition-colors duration-300"
+                style={{
+                  color: role === "tourist" ? "#fff" : textSecondary,
+                  fontSize: 14,
+                  fontWeight: role === "tourist" ? 600 : 400,
+                }}
+              >
+                Путешественник
+              </button>
+              <button
+                onClick={() => setRole("vendor")}
+                className="flex-1 h-full flex items-center justify-center transition-colors duration-300"
+                style={{
+                  color: role === "vendor" ? "#fff" : textSecondary,
+                  fontSize: 14,
+                  fontWeight: role === "vendor" ? 600 : 400,
+                }}
+              >
+                Организатор
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* Form */}
         <AnimatePresence mode="wait">
@@ -108,20 +169,21 @@ export function AuthPage({ onLogin, isDark = true }: AuthPageProps) {
             exit={{ opacity: 0, x: mode === "login" ? 20 : -20 }}
             transition={{ duration: 0.2 }}
           >
-            {/* Login field */}
+            {/* Email field */}
             <div className="mb-4">
               <label className="block mb-2" style={{ fontSize: 13, color: textMuted }}>
-                Логин
+                Email
               </label>
               <input
-                type="text"
-                value={login}
-                onChange={(e) => { setLogin(e.target.value); setError(""); }}
-                placeholder="Введите логин"
+                type="email"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setError(""); }}
+                placeholder="Введите email"
+                disabled={loading}
                 className="w-full px-4 py-3.5 rounded-2xl outline-none transition-all"
                 style={{
                   background: inputBg,
-                  border: `1px solid ${error && !login ? "#ff4444" : inputBorder}`,
+                  border: `1px solid ${error && !email ? "#ff4444" : inputBorder}`,
                   color: isDark ? "#fff" : "#222",
                   fontSize: 15,
                 }}
@@ -139,6 +201,7 @@ export function AuthPage({ onLogin, isDark = true }: AuthPageProps) {
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setError(""); }}
                   placeholder="Введите пароль"
+                  disabled={loading}
                   className="w-full px-4 py-3.5 rounded-2xl outline-none pr-12 transition-all"
                   style={{
                     background: inputBg,
@@ -212,15 +275,11 @@ export function AuthPage({ onLogin, isDark = true }: AuthPageProps) {
           <button
             onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}
             style={{ fontSize: 14, color: "#FF6B35" }}
+            disabled={loading}
           >
             {mode === "login" ? "Регистрация" : "Войти"}
           </button>
         </div>
-
-        {/* Demo hint */}
-        <p className="text-center mt-8" style={{ fontSize: 12, color: textMuted }}>
-          Демо: введите любой логин и пароль (4+ символов)
-        </p>
       </div>
     </div>
   );

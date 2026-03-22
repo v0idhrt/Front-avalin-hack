@@ -14,6 +14,15 @@ import {
 } from "lucide-react";
 import { IMAGES } from "./data";
 import { glass } from "./LiquidBackground";
+import { useMe } from "@/app/hooks/useAuth";
+import { 
+  useProfile, 
+  useMyBookings, 
+  useMyLikes, 
+  useMyRoutes, 
+  useMySubscriptions, 
+  useMyReviews 
+} from "@/app/hooks/useProfile";
 
 interface UserProfileProps {
   onNavigate?: (section: string) => void;
@@ -21,18 +30,28 @@ interface UserProfileProps {
   onLogout?: () => void;
 }
 
-const menuItems = [
-  { id: "subscriptions", icon: Users, label: "Подписки", count: "12" },
-  { id: "routes", icon: Map, label: "Мои маршруты", count: "3" },
-  { id: "likes", icon: Heart, label: "Мои лайки", count: "47" },
-  { id: "reviews", icon: MessageSquare, label: "Мои отзывы", count: "8" },
-  { id: "bookings", icon: CalendarCheck, label: "Мои брони", count: "2", highlight: true },
-  { id: "receipts", icon: Receipt, label: "История чеков", count: "" },
-  { id: "support", icon: HeadphonesIcon, label: "Поддержка", count: "" },
-  { id: "about", icon: Info, label: "О приложении", count: "" },
-];
-
 export function UserProfile({ onNavigate, isDark = true, onLogout }: UserProfileProps) {
+  const { data: user } = useMe();
+  
+  // Fetch real data from all services
+  const { data: profile } = useProfile(user?.id);
+  const { data: bookings } = useMyBookings(user?.id);
+  const { data: routes } = useMyRoutes(user?.id);
+  const { data: likes } = useMyLikes(user?.id);
+  const { data: subs } = useMySubscriptions(user?.id);
+  const { data: reviews } = useMyReviews(user?.id);
+
+  const menuItems = [
+    { id: "subscriptions", icon: Users, label: "Подписки", count: subs?.length.toString() || "0" },
+    { id: "routes", icon: Map, label: "Мои маршруты", count: routes?.length.toString() || "0" },
+    { id: "likes", icon: Heart, label: "Мои лайки", count: likes?.length.toString() || "0" },
+    { id: "reviews", icon: MessageSquare, label: "Мои отзывы", count: reviews?.length.toString() || "0" },
+    { id: "bookings", icon: CalendarCheck, label: "Мои брони", count: bookings?.length.toString() || "0", highlight: true },
+    { id: "receipts", icon: Receipt, label: "История чеков", count: "" },
+    { id: "support", icon: HeadphonesIcon, label: "Поддержка", count: "" },
+    { id: "about", icon: Info, label: "О приложении", count: "" },
+  ];
+
   const textPrimary = isDark ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.9)";
   const textSecondary = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.45)";
   const iconColor = isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.35)";
@@ -72,7 +91,7 @@ export function UserProfile({ onNavigate, isDark = true, onLogout }: UserProfile
             }}
           >
             <img
-              src={IMAGES.avatarFemale}
+              src={profile?.avatar_url || IMAGES.avatarFemale}
               alt="avatar"
               className="w-full h-full rounded-full object-cover"
               style={{
@@ -92,8 +111,12 @@ export function UserProfile({ onNavigate, isDark = true, onLogout }: UserProfile
             <span className="text-white" style={{ fontSize: 11 }}>✓</span>
           </motion.div>
         </div>
-        <h2 style={{ color: textPrimary }}>Алиса Петрова</h2>
-        <p style={{ fontSize: 14, color: textSecondary, marginTop: 4 }}>alisa.petrova@mail.com</p>
+        <h2 style={{ color: textPrimary }}>
+          {profile?.name || user?.fullName || user?.email?.split("@")[0] || "Путешественник"}
+        </h2>
+        <p style={{ fontSize: 14, color: textSecondary, marginTop: 4 }}>
+          {user?.email || "загрузка..."}
+        </p>
       </div>
 
       {/* Active bookings — glass card */}
@@ -147,11 +170,15 @@ export function UserProfile({ onNavigate, isDark = true, onLogout }: UserProfile
                 border: "1px solid rgba(255,107,53,0.15)",
               }}
             >
-              Через 3 дня
+              {bookings && bookings.length > 0 ? "Активно" : "Нет броней"}
             </span>
           </div>
-          <p className="relative z-10" style={{ color: textPrimary, marginBottom: 4 }}>Закаты Санторини</p>
-          <p className="relative z-10" style={{ fontSize: 13, color: textSecondary }}>23 марта 2026, 17:00 · 2 чел.</p>
+          <p className="relative z-10" style={{ color: textPrimary, marginBottom: 4 }}>
+            {bookings && bookings.length > 0 ? "У вас есть активные поездки" : "Пока ничего не забронировано"}
+          </p>
+          <p className="relative z-10" style={{ fontSize: 13, color: textSecondary }}>
+            {bookings && bookings.length > 0 ? `Всего бронирований: ${bookings.length}` : "Найдите свою первую экскурсию"}
+          </p>
         </motion.div>
       </div>
 
@@ -182,15 +209,6 @@ export function UserProfile({ onNavigate, isDark = true, onLogout }: UserProfile
                   : glassItem),
               }}
             >
-              {/* Gloss line */}
-              <div
-                className="absolute top-0 left-[8%] right-[8%] h-px"
-                style={{
-                  background: isDark
-                    ? "linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent)"
-                    : "linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)",
-                }}
-              />
               <div
                 className="w-10 h-10 rounded-xl flex items-center justify-center"
                 style={{
@@ -210,7 +228,7 @@ export function UserProfile({ onNavigate, isDark = true, onLogout }: UserProfile
               <span className="flex-1 text-left" style={{ color: isDark ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.75)" }}>
                 {item.label}
               </span>
-              {item.count && (
+              {item.count !== undefined && (
                 <span style={{ fontSize: 13, color: textSecondary, marginRight: 8 }}>{item.count}</span>
               )}
               <ChevronRight size={16} color={isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.12)"} />
@@ -218,23 +236,11 @@ export function UserProfile({ onNavigate, isDark = true, onLogout }: UserProfile
           );
         })}
         <motion.button
-          initial={{ opacity: 0, x: -15 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: menuItems.length * 0.04 }}
           whileTap={{ scale: 0.97 }}
           onClick={onLogout}
           className="w-full flex items-center gap-4 p-4 rounded-2xl relative overflow-hidden"
           style={glassItem}
         >
-          {/* Gloss line */}
-          <div
-            className="absolute top-0 left-[8%] right-[8%] h-px"
-            style={{
-              background: isDark
-                ? "linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent)"
-                : "linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)",
-            }}
-          />
           <div
             className="w-10 h-10 rounded-xl flex items-center justify-center"
             style={{
@@ -242,10 +248,7 @@ export function UserProfile({ onNavigate, isDark = true, onLogout }: UserProfile
               border: isDark ? "1px solid rgba(255,255,255,0.06)" : "1px solid rgba(0,0,0,0.04)",
             }}
           >
-            <LogOut
-              size={18}
-              color={iconColor}
-            />
+            <LogOut size={18} color={iconColor} />
           </div>
           <span className="flex-1 text-left" style={{ color: isDark ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.75)" }}>
             Выйти

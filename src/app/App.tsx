@@ -4,12 +4,12 @@ import { TabBar } from "./components/TabBar";
 import { HomeFeed } from "./components/HomeFeed";
 import { DiscoveryFeed } from "./components/DiscoveryFeed";
 import { RoutesFeed } from "./components/RoutesFeed";
-import { ExcursionCard } from "./components/ExcursionCard";
-import { BookingFlow } from "./components/BookingFlow";
-import { OrganizerProfile } from "./components/OrganizerProfile";
 import { UserProfile } from "./components/UserProfile";
+import { OrganizerProfile } from "./components/OrganizerProfile";
+import { ExcursionCard as ExcursionDetail } from "./components/ExcursionCard";
+import { BookingFlow } from "./components/BookingFlow";
+import { AuthPage } from "./components/AuthPage";
 import { MyRoutes } from "./components/MyRoutes";
-import { SettingsPage } from "./components/SettingsPage";
 import {
   SubscriptionsPage,
   LikesPage,
@@ -18,29 +18,42 @@ import {
   ReceiptsPage,
   SupportPage,
   AboutPage,
+  SettingsPage,
 } from "./components/ProfileSubPages";
-import { LiquidBackground } from "./components/LiquidBackground";
-import { AuthPage } from "./components/AuthPage";
 import { OrganizerDashboard } from "./components/OrganizerDashboard";
-import { excursions, organizers, posts, Excursion } from "./components/data";
+import { excursions, organizers, Excursion, Organizer } from "./components/data";
+import { LiquidBackground } from "./components/LiquidBackground";
+import { useExcursion } from "./hooks/useContent";
+
+function ExcursionById({ excursionId, onBack, onBook, isDark }: { excursionId: number; onBack: () => void; onBook: (exc: any) => void; isDark: boolean }) {
+  const { data, isLoading } = useExcursion(excursionId);
+  const fallback = excursions.find(e => e.id === `exc${excursionId}`);
+  const excursion = data ?? fallback;
+
+  if (isLoading && !fallback) {
+    return <div className="flex items-center justify-center h-full"><motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="w-8 h-8 border-2 border-orange-500/30 border-t-orange-500 rounded-full" /></div>;
+  }
+  if (!excursion) return null;
+  return <ExcursionDetail excursion={excursion} onBack={onBack} onBook={onBook} isDark={isDark} />;
+}
 
 type Screen =
   | { type: "home" }
-  | { type: "discovery"; highlightId?: string }
+  | { type: "discovery" }
   | { type: "routes" }
   | { type: "profile" }
-  | { type: "excursion"; excursion: Excursion }
-  | { type: "booking"; excursion: Excursion }
-  | { type: "organizer"; organizerId: string }
-  | { type: "myRoutes" }
-  | { type: "settings" }
+  | { type: "excursion"; excursion: any; excursionId?: number }
+  | { type: "booking"; excursion: any }
+  | { type: "organizer"; organizer: Organizer; authorUserId?: number }
   | { type: "subscriptions" }
   | { type: "likes" }
   | { type: "reviews" }
   | { type: "bookings" }
   | { type: "receipts" }
   | { type: "support" }
-  | { type: "about" };
+  | { type: "about" }
+  | { type: "settings" }
+  | { type: "myRoutes" };
 
 type AuthState =
   | { status: "unauthenticated" }
@@ -55,8 +68,9 @@ export default function App() {
   const [isDark, setIsDark] = useState(true);
 
   const handleLogin = useCallback((role: "user" | "organizer", organizerId?: string) => {
-    if (role === "organizer" && organizerId) {
-      setAuth({ status: "organizer", organizerId });
+    if (role === "organizer") {
+      setAuth({ status: "organizer", organizerId: organizerId || "org1" });
+      setScreen({ type: "home" });
     } else {
       setAuth({ status: "user" });
       setScreen({ type: "home" });
@@ -69,25 +83,11 @@ export default function App() {
     setHistory([]);
   }, []);
 
-  const activeTab =
-    screen.type === "home"
-      ? "home"
-      : screen.type === "discovery"
-      ? "discovery"
-      : screen.type === "routes"
-      ? "routes"
-      : screen.type === "profile"
-      ? "profile"
-      : "home";
-
-  const navigate = useCallback(
-    (next: Screen) => {
-      setHistory((prev) => [...prev, screen]);
-      setScreen(next);
-      setTabBarVisible(true);
-    },
-    [screen]
-  );
+  const navigate = useCallback((next: Screen) => {
+    setHistory((prev) => [...prev, screen]);
+    setScreen(next);
+    setTabBarVisible(true);
+  }, [screen]);
 
   const goBack = useCallback(() => {
     setHistory((prev) => {
@@ -97,279 +97,96 @@ export default function App() {
       setScreen(last);
       return newHistory;
     });
-    setTabBarVisible(true);
   }, []);
 
-  const handleTabNavigate = useCallback(
-    (tab: "home" | "discovery" | "routes" | "profile") => {
-      setHistory([]);
-      if (tab === "home") setScreen({ type: "home" });
-      else if (tab === "discovery") setScreen({ type: "discovery" });
-      else if (tab === "routes") setScreen({ type: "routes" });
-      else setScreen({ type: "profile" });
-      setTabBarVisible(true);
-    },
-    []
-  );
+  const handleTabNavigate = useCallback((tab: string) => {
+    setHistory([]);
+    if (tab === "home") setScreen({ type: "home" });
+    else if (tab === "discovery") setScreen({ type: "discovery" });
+    else if (tab === "routes") setScreen({ type: "routes" });
+    else setScreen({ type: "profile" });
+  }, []);
 
-  const handleExcursionFromPost = useCallback(
-    (excursionId: string) => {
-      const exc = excursions.find((e) => e.id === excursionId);
-      if (exc) navigate({ type: "excursion", excursion: exc });
-    },
-    [navigate]
-  );
+  const handleExcursionFromPost = useCallback((excursionId: string) => {
+    const numericId = parseInt(excursionId.replace("exc", ""));
+    const exc = excursions.find((e) => e.id === excursionId);
+    navigate({ type: "excursion", excursion: exc ?? {}, excursionId: numericId });
+  }, [navigate]);
 
-  const handleExcursionSelect = useCallback(
-    (exc: Excursion) => {
-      navigate({ type: "excursion", excursion: exc });
-    },
-    [navigate]
-  );
+  const handleAuthorClick = useCallback((authorId: string) => {
+    const numericId = parseInt(authorId);
+    const org = organizers.find((o) => o.id === `org${authorId}`) ?? organizers[0];
+    navigate({ type: "organizer", organizer: org, authorUserId: numericId });
+  }, [navigate]);
 
-  const handleBook = useCallback(
-    (exc: Excursion) => {
-      navigate({ type: "booking", excursion: exc });
-    },
-    [navigate]
-  );
-
-  const handleProfileNavigate = useCallback(
-    (section: string) => {
-      if (section === "routes") navigate({ type: "myRoutes" });
-      else if (section === "settings") navigate({ type: "settings" });
-      else if (section === "subscriptions") navigate({ type: "subscriptions" });
-      else if (section === "likes") navigate({ type: "likes" });
-      else if (section === "reviews") navigate({ type: "reviews" });
-      else if (section === "bookings") navigate({ type: "bookings" });
-      else if (section === "receipts") navigate({ type: "receipts" });
-      else if (section === "support") navigate({ type: "support" });
-      else if (section === "about") navigate({ type: "about" });
-    },
-    [navigate]
-  );
-
-  const handleAuthorClick = useCallback(
-    (postId: string) => {
-      const post = posts.find((p) => p.id === postId);
-      if (post) {
-        const exc = excursions.find((e) => e.id === post.excursionId);
-        if (exc) {
-          navigate({ type: "organizer", organizerId: exc.organizerId });
-          return;
-        }
-      }
-      navigate({ type: "organizer", organizerId: organizers[0].id });
-    },
-    [navigate]
-  );
-
-  const showTabs =
-    auth.status === "user" &&
-    (screen.type === "home" ||
-      screen.type === "discovery" ||
-      screen.type === "routes" ||
-      screen.type === "profile");
-
-  const bgVariant =
-    screen.type === "settings"
-      ? "cool"
-      : screen.type === "profile"
-      ? "aurora"
-      : screen.type === "routes"
-      ? "warm"
-      : screen.type === "discovery"
-      ? "warm"
-      : "default";
-
-  // Auth screen
-  if (auth.status === "unauthenticated") {
-    return (
-      <div
-        className="relative w-full h-screen overflow-hidden mx-auto"
-        style={{ maxWidth: 430, fontFamily: "'Inter', -apple-system, sans-serif" }}
-      >
-        <LiquidBackground variant="default" />
-        {!isDark && (
-          <div
-            className="absolute inset-0 z-[1] pointer-events-none"
-            style={{ background: "rgba(248, 248, 252, 0.82)" }}
-          />
-        )}
-        <div className="absolute inset-0 z-[2]">
-          <AuthPage onLogin={handleLogin} isDark={isDark} />
-        </div>
-      </div>
-    );
-  }
-
-  // Organizer dashboard
-  if (auth.status === "organizer") {
-    const org = organizers.find((o) => o.id === auth.organizerId) || organizers[0];
-    return (
-      <div
-        className="relative w-full h-screen overflow-hidden mx-auto"
-        style={{ maxWidth: 430, fontFamily: "'Inter', -apple-system, sans-serif" }}
-      >
-        <LiquidBackground variant="aurora" />
-        {!isDark && (
-          <div
-            className="absolute inset-0 z-[1] pointer-events-none"
-            style={{ background: "rgba(248, 248, 252, 0.82)" }}
-          />
-        )}
-        <div className="absolute inset-0 z-[2]">
-          <OrganizerDashboard
-            organizer={org}
-            onLogout={handleLogout}
-            isDark={isDark}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  // User app
   return (
-    <div
-      className="relative w-full h-screen overflow-hidden mx-auto"
-      style={{
-        maxWidth: 430,
-        fontFamily: "'Inter', -apple-system, sans-serif",
-      }}
-    >
-      <LiquidBackground variant={isDark ? bgVariant : bgVariant} />
+    <div className={`min-h-full w-full relative flex flex-col ${isDark ? "dark" : ""}`} style={{ background: isDark ? "#06060C" : "#f8f8fc" }}>
+      <LiquidBackground variant={isDark ? "default" : "aurora"} />
+      
+      <div className="flex-1 w-full max-w-md mx-auto relative z-10 shadow-2xl overflow-hidden flex flex-col" style={{ background: isDark ? "rgba(6, 6, 12, 0.5)" : "rgba(248, 248, 252, 0.5)" }}>
+        <AnimatePresence mode="wait">
+          {auth.status === "unauthenticated" ? (
+            <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col">
+              <AuthPage onLogin={handleLogin} isDark={isDark} />
+            </motion.div>
+          ) : (
+            <motion.div key="main" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 overflow-hidden flex flex-col">
+              {screen.type === "home" && <HomeFeed onExcursionClick={handleExcursionFromPost} onScroll={setTabBarVisible} onAuthorClick={handleAuthorClick} isDark={isDark} />}
+              {screen.type === "discovery" && <DiscoveryFeed onExcursionSelect={(exc) => navigate({ type: "excursion", excursion: exc })} isDark={isDark} />}
+              {screen.type === "routes" && <RoutesFeed isDark={isDark} onScroll={setTabBarVisible} />}
+              {screen.type === "profile" && (
+                auth.status === "organizer" ? (
+                  <OrganizerDashboard onLogout={handleLogout} isDark={isDark} />
+                ) : (
+                  <UserProfile onNavigate={(s) => {
+                    if (s === "routes") navigate({ type: "myRoutes" });
+                    else if (s === "settings") navigate({ type: "settings" });
+                    else if (s === "subscriptions") navigate({ type: "subscriptions" });
+                    else if (s === "likes") navigate({ type: "likes" });
+                    else if (s === "reviews") navigate({ type: "reviews" });
+                    else if (s === "bookings") navigate({ type: "bookings" });
+                    else if (s === "receipts") navigate({ type: "receipts" });
+                    else if (s === "support") navigate({ type: "support" });
+                    else if (s === "about") navigate({ type: "about" });
+                  }} onLogout={handleLogout} isDark={isDark} />
+                )
+              )}
+              {screen.type === "organizer" && <OrganizerProfile organizer={screen.organizer} authorUserId={screen.authorUserId} onBack={goBack} onExcursionClick={(exc) => navigate({ type: "excursion", excursion: exc })} isDark={isDark} />}
+              {screen.type === "excursion" && screen.excursionId && (
+                <ExcursionById excursionId={screen.excursionId} onBack={goBack} onBook={(exc) => navigate({ type: "booking", excursion: exc })} isDark={isDark} />
+              )}
+              {screen.type === "excursion" && !screen.excursionId && (
+                <ExcursionDetail excursion={screen.excursion} onBack={goBack} onBook={(exc) => navigate({ type: "booking", excursion: exc })} isDark={isDark} />
+              )}
+              {screen.type === "booking" && <BookingFlow excursion={screen.excursion} onBack={goBack} onComplete={() => setScreen({ type: "home" })} isDark={isDark} />}
+              {screen.type === "myRoutes" && <MyRoutes onBack={goBack} isDark={isDark} />}
+              {screen.type === "subscriptions" && <SubscriptionsPage onBack={goBack} isDark={isDark} onOrganizerClick={(placeId) => {
+                const numericId = parseInt(placeId);
+                const org = organizers.find(o => o.id === `org${placeId}`) ?? organizers[0];
+                navigate({ type: "organizer", organizer: org, authorUserId: numericId });
+              }} />}
+              {screen.type === "likes" && <LikesPage onBack={goBack} isDark={isDark} />}
+              {screen.type === "reviews" && <ReviewsPage onBack={goBack} isDark={isDark} />}
+              {screen.type === "bookings" && <BookingsPage onBack={goBack} isDark={isDark} />}
+              {screen.type === "receipts" && <ReceiptsPage onBack={goBack} isDark={isDark} />}
+              {screen.type === "support" && <SupportPage onBack={goBack} isDark={isDark} />}
+              {screen.type === "about" && <AboutPage onBack={goBack} isDark={isDark} />}
+              {screen.type === "settings" && <SettingsPage onBack={goBack} isDark={isDark} onToggleTheme={() => setIsDark(!isDark)} />}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-      {!isDark && (
-        <div
-          className="absolute inset-0 z-[1] pointer-events-none"
-          style={{ background: "rgba(248, 248, 252, 0.82)" }}
-        />
-      )}
-
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={
-            screen.type +
-            (screen.type === "excursion" ? screen.excursion.id : "")
-          }
-          className="absolute inset-0 z-[2]"
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ duration: 0.25, ease: "easeInOut" }}
-        >
-          {screen.type === "home" && (
-            <HomeFeed
-              onExcursionClick={handleExcursionFromPost}
-              onScroll={(down) => setTabBarVisible(!down)}
-              onAuthorClick={handleAuthorClick}
+        {auth.status !== "unauthenticated" && screen.type !== "excursion" && screen.type !== "booking" && screen.type !== "organizer" && (
+          <div className="absolute bottom-0 left-0 right-0 z-50">
+            <TabBar
+              active={screen.type as any}
+              onNavigate={handleTabNavigate}
+              visible={tabBarVisible}
               isDark={isDark}
             />
-          )}
-          {screen.type === "discovery" && (
-            <DiscoveryFeed
-              highlightId={screen.highlightId}
-              onExcursionSelect={handleExcursionSelect}
-              isDark={isDark}
-            />
-          )}
-          {screen.type === "routes" && (
-            <RoutesFeed
-              isDark={isDark}
-              onScroll={(down) => setTabBarVisible(!down)}
-            />
-          )}
-          {screen.type === "profile" && (
-            <UserProfile
-              onNavigate={handleProfileNavigate}
-              isDark={isDark}
-              onLogout={handleLogout}
-            />
-          )}
-          {screen.type === "excursion" && (
-            <ExcursionCard
-              excursion={screen.excursion}
-              onBack={goBack}
-              onBook={handleBook}
-              onSimilarClick={handleExcursionSelect}
-              isDark={isDark}
-            />
-          )}
-          {screen.type === "booking" && (
-            <BookingFlow
-              excursion={screen.excursion}
-              onBack={goBack}
-              onComplete={() => handleTabNavigate("profile")}
-              isDark={isDark}
-            />
-          )}
-          {screen.type === "organizer" && (
-            <OrganizerProfile
-              organizer={
-                organizers.find((o) => o.id === screen.organizerId) ||
-                organizers[0]
-              }
-              onBack={goBack}
-              onExcursionClick={handleExcursionSelect}
-              isDark={isDark}
-            />
-          )}
-          {screen.type === "myRoutes" && <MyRoutes onBack={goBack} isDark={isDark} />}
-          {screen.type === "subscriptions" && (
-            <SubscriptionsPage
-              onBack={goBack}
-              isDark={isDark}
-              onOrganizerClick={(id) =>
-                navigate({ type: "organizer", organizerId: id })
-              }
-            />
-          )}
-          {screen.type === "likes" && (
-            <LikesPage
-              onBack={goBack}
-              isDark={isDark}
-              onExcursionClick={(id) => {
-                const exc = excursions.find((e) => e.id === id);
-                if (exc) navigate({ type: "excursion", excursion: exc });
-              }}
-            />
-          )}
-          {screen.type === "reviews" && (
-            <ReviewsPage onBack={goBack} isDark={isDark} />
-          )}
-          {screen.type === "bookings" && (
-            <BookingsPage onBack={goBack} isDark={isDark} />
-          )}
-          {screen.type === "receipts" && (
-            <ReceiptsPage onBack={goBack} isDark={isDark} />
-          )}
-          {screen.type === "support" && (
-            <SupportPage onBack={goBack} isDark={isDark} />
-          )}
-          {screen.type === "about" && (
-            <AboutPage onBack={goBack} isDark={isDark} />
-          )}
-          {screen.type === "settings" && (
-            <SettingsPage
-              onBack={goBack}
-              isDark={isDark}
-              onToggleTheme={() => setIsDark(!isDark)}
-            />
-          )}
-        </motion.div>
-      </AnimatePresence>
-
-      {showTabs && (
-        <div className="relative z-[3]">
-          <TabBar
-            active={activeTab as "home" | "discovery" | "routes" | "profile"}
-            onNavigate={handleTabNavigate}
-            visible={tabBarVisible}
-            isDark={isDark}
-          />
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

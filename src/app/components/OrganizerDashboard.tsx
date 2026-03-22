@@ -1,537 +1,281 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Star, LogOut, Edit3, Plus, X, Phone, Mail, Globe, MapPin,
-  Clock, ChevronRight, Image, MessageSquare, Trash2, Save, Camera,
-  Sparkles,
+  Clock, ChevronRight, Image as ImageIcon, MessageSquare, Trash2, Save, Camera,
+  Sparkles, Check,
 } from "lucide-react";
-import { excursions, posts, organizers, Post, Excursion, Organizer, IMAGES, mockComments, Comment, reviews } from "./data";
+import { IMAGES } from "./data";
+import { useMe } from "@/app/hooks/useAuth";
+import { useProfile, useMySubscriptions, useMyReviews } from "@/app/hooks/useProfile";
+import { useFeed, useExcursions, useCreateExcursion, useUpdateExcursion, useCreatePost } from "@/app/hooks/useContent";
+import { generatePostWithAi } from "@/app/api/contentApi";
 
 interface OrganizerDashboardProps {
-  organizer: Organizer;
   onLogout: () => void;
   isDark?: boolean;
 }
 
 type Tab = "excursions" | "posts" | "reviews";
 
-export function OrganizerDashboard({ organizer, onLogout, isDark = true }: OrganizerDashboardProps) {
-  const [activeTab, setActiveTab] = useState<Tab>("excursions");
-  const [myExcursions, setMyExcursions] = useState<Excursion[]>(
-    excursions.filter((e) => e.organizerId === organizer.id)
-  );
-  const [myPosts, setMyPosts] = useState<Post[]>(
-    posts.filter((p) => p.author === organizer.name)
-  );
+const InputField = ({ label, value, onChange, placeholder, multiline, type = "text", isDark, inputBg, inputBorder, textMuted }: any) => (
+  <div className="mb-4">
+    <label className="block mb-1.5" style={{ fontSize: 12, color: textMuted }}>{label}</label>
+    {multiline ? (
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={3}
+        className="w-full px-4 py-3 rounded-xl outline-none resize-none"
+        style={{ background: inputBg, border: `1px solid ${inputBorder}`, color: isDark ? "#fff" : "#222", fontSize: 14 }}
+      />
+    ) : (
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full px-4 py-3 rounded-xl outline-none"
+        style={{ background: inputBg, border: `1px solid ${inputBorder}`, color: isDark ? "#fff" : "#222", fontSize: 14 }}
+      />
+    )}
+  </div>
+);
 
-  // Edit states
+export function OrganizerDashboard({ onLogout, isDark = true }: OrganizerDashboardProps) {
+  const { data: user } = useMe();
+  const { data: profile, isLoading: isProfileLoading } = useProfile(user?.id);
+  const { data: feedPosts } = useFeed();
+  const { data: allExcursions } = useExcursions();
+  const { data: subs } = useMySubscriptions(user?.id);
+  const { data: allReviews } = useMyReviews(user?.id);
+
+  const createExcursionMutation = useCreateExcursion();
+  const updateExcursionMutation = useUpdateExcursion();
+  const createPostMutation = useCreatePost();
+
+  const [activeTab, setActiveTab] = useState<Tab>("excursions");
+  
+  // Local state management
+  const [localProfile, setLocalProfile] = useState<any>(null);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [profileName, setProfileName] = useState(organizer.name);
-  const [profileDesc, setProfileDesc] = useState(organizer.description);
-  const [profilePhone, setProfilePhone] = useState(organizer.phone || "");
-  const [profileEmail, setProfileEmail] = useState(organizer.email || "");
-  const [profileWebsite, setProfileWebsite] = useState(organizer.website || "");
+  const [backupProfile, setBackupProfile] = useState<any>(null);
+
+  useEffect(() => {
+    if (profile && !localProfile) {
+      const initial = {
+        name: profile.name,
+        bio: profile.bio || "Премиальные авторские туры.",
+        phone: "+7 (900) 123-45-67",
+        email: user?.email,
+        avatar: profile.avatar_url || IMAGES.avatarGuideM
+      };
+      setLocalProfile(initial);
+    }
+  }, [profile, user]);
+
+  const startEditing = () => {
+    setBackupProfile({ ...localProfile });
+    setEditingProfile(true);
+  };
+
+  const cancelEditing = () => {
+    setLocalProfile(backupProfile);
+    setEditingProfile(false);
+  };
+
+  const saveProfileLocally = () => {
+    setEditingProfile(false);
+    // Здесь можно было бы добавить toast "Сохранено локально"
+  };
+
+  const myExcursions = allExcursions?.filter(e => e.place_id === user?.id) || [];
+  const myPosts = feedPosts?.filter(p => p.author_user_id === user?.id) || [];
 
   // Excursion editor
   const [showExcEditor, setShowExcEditor] = useState(false);
-  const [editingExc, setEditingExc] = useState<Excursion | null>(null);
-  const [excForm, setExcForm] = useState({
-    title: "", location: "", price: "", duration: "", description: "", category: "",
-  });
+  const [editingExcId, setEditingExcId] = useState<number | null>(null);
+  const [excForm, setExcForm] = useState({ title: "", price: "", duration: "", description: "" });
 
-  // Post editor
+  const openEditExcursion = (exc: any) => {
+    setEditingExcId(exc.id);
+    setExcForm({
+      title: exc.title,
+      price: exc.price_amount.toString(),
+      duration: exc.duration_minutes.toString(),
+      description: exc.short_description || "",
+    });
+    setShowExcEditor(true);
+  };
+
+  const handleSaveExcursion = async () => {
+    if (!user || !excForm.title) return;
+    const body = {
+      place_id: user.id,
+      title: excForm.title,
+      price_amount: parseFloat(excForm.price) || 0,
+      duration_minutes: parseInt(excForm.duration) || 60,
+      short_description: excForm.description,
+      slug: `exc-${Date.now()}`,
+    };
+
+    try {
+      if (editingExcId) {
+        await updateExcursionMutation.mutateAsync({ id: editingExcId, body });
+      } else {
+        await createExcursionMutation.mutateAsync(body);
+      }
+      setShowExcEditor(false);
+      setEditingExcId(null);
+      setExcForm({ title: "", price: "", duration: "", description: "" });
+    } catch (e) { alert("Ошибка при сохранении"); }
+  };
+
   const [showPostEditor, setShowPostEditor] = useState(false);
-  const [editingPost, setEditingPost] = useState<Post | null>(null);
-  const [postForm, setPostForm] = useState({ description: "" });
-  const [generating, setGenerating] = useState(false);
-  const [expandedPostComments, setExpandedPostComments] = useState<string | null>(null);
-  const [genPrompt, setGenPrompt] = useState("");
+  const [postForm, setPostForm] = useState({ title: "", content: "" });
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const handleGenerateWithAi = async () => {
+    if (!aiPrompt.trim()) return;
+    setAiLoading(true);
+    try {
+      const result = await generatePostWithAi({ prompt: aiPrompt, organizer_name: p.name });
+      setPostForm({ title: result.title, content: result.content });
+    } catch {
+      alert("Не удалось сгенерировать пост");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleCreatePost = async () => {
+    if (!user || !postForm.content) return;
+    try {
+      await createPostMutation.mutateAsync({
+        author_user_id: user.id,
+        place_id: user.id,
+        title: postForm.title || "Новый пост",
+        content: postForm.content,
+        cover_image_url: IMAGES.sochi,
+        type: "info"
+      });
+      setShowPostEditor(false);
+      setPostForm({ title: "", content: "" });
+    } catch (e) { alert("Ошибка"); }
+  };
 
   const bg = isDark ? "#0A0A0F" : "#f8f8fc";
   const textPrimary = isDark ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.9)";
   const textSecondary = isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.45)";
-  const textMuted = isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.25)";
+  const textMuted = isDark ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.35)";
   const cardBg = isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)";
   const cardBorder = isDark ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(0,0,0,0.06)";
-  const inputBg = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)";
-  const inputBorder = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)";
   const divider = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
+  const commonInputProps = { isDark, inputBg: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)", inputBorder: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)", textMuted };
 
-  const openExcEditor = (exc?: Excursion) => {
-    if (exc) {
-      setEditingExc(exc);
-      setExcForm({
-        title: exc.title, location: exc.location, price: exc.price,
-        duration: exc.duration, description: exc.description, category: exc.category,
-      });
-    } else {
-      setEditingExc(null);
-      setExcForm({ title: "", location: "", price: "", duration: "", description: "", category: "" });
-    }
-    setShowExcEditor(true);
-  };
+  if (isProfileLoading && !localProfile) {
+    return <div className="h-full flex items-center justify-center" style={{ background: bg }}><motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="w-8 h-8 border-2 border-orange-500/30 border-t-orange-500 rounded-full" /></div>;
+  }
 
-  const saveExcursion = () => {
-    if (!excForm.title.trim()) return;
-    if (editingExc) {
-      setMyExcursions((prev) =>
-        prev.map((e) => e.id === editingExc.id ? { ...e, ...excForm } : e)
-      );
-    } else {
-      const newExc: Excursion = {
-        id: `exc_new_${Date.now()}`,
-        ...excForm,
-        image: organizer.avatar,
-        rating: 0,
-        reviewCount: 0,
-        organizerId: organizer.id,
-      };
-      setMyExcursions((prev) => [newExc, ...prev]);
-    }
-    setShowExcEditor(false);
-  };
-
-  const deleteExcursion = (id: string) => {
-    setMyExcursions((prev) => prev.filter((e) => e.id !== id));
-  };
-
-  const openPostEditor = (post?: Post) => {
-    if (post) {
-      setEditingPost(post);
-      setPostForm({ description: post.description });
-    } else {
-      setEditingPost(null);
-      setPostForm({ description: "" });
-    }
-    setGenPrompt("");
-    setShowPostEditor(true);
-  };
-
-  const savePost = () => {
-    if (!postForm.description.trim()) return;
-    if (editingPost) {
-      setMyPosts((prev) =>
-        prev.map((p) => p.id === editingPost.id ? { ...p, ...postForm } : p)
-      );
-    } else {
-      const newPost: Post = {
-        id: `post_new_${Date.now()}`,
-        image: organizer.avatar,
-        author: organizer.name,
-        authorAvatar: organizer.avatar,
-        description: postForm.description,
-        likes: 0,
-        comments: 0,
-      };
-      setMyPosts((prev) => [newPost, ...prev]);
-    }
-    setShowPostEditor(false);
-  };
-
-  const deletePost = (id: string) => {
-    setMyPosts((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const tabs: { key: Tab; label: string; count: number }[] = [
-    { key: "excursions", label: "Экскурсии", count: myExcursions.length },
-    { key: "posts", label: "Посты", count: myPosts.length },
-    { key: "reviews", label: "Отзывы", count: reviews.length },
-  ];
-
-  const InputField = ({ label, value, onChange, placeholder, multiline }: {
-    label: string; value: string; onChange: (v: string) => void; placeholder: string; multiline?: boolean;
-  }) => (
-    <div className="mb-4">
-      <label className="block mb-1.5" style={{ fontSize: 12, color: textMuted }}>{label}</label>
-      {multiline ? (
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          rows={3}
-          className="w-full px-4 py-3 rounded-xl outline-none resize-none"
-          style={{ background: inputBg, border: `1px solid ${inputBorder}`, color: isDark ? "#fff" : "#222", fontSize: 14 }}
-        />
-      ) : (
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full px-4 py-3 rounded-xl outline-none"
-          style={{ background: inputBg, border: `1px solid ${inputBorder}`, color: isDark ? "#fff" : "#222", fontSize: 14 }}
-        />
-      )}
-    </div>
-  );
+  const p = localProfile || { name: "Организатор", bio: "Загрузка...", email: user?.email, avatar: IMAGES.avatarGuideM, phone: "" };
 
   return (
     <div className="h-full relative" style={{ background: bg }}>
       <div className="h-full overflow-y-auto pb-6" style={{ scrollbarWidth: "none" }}>
-        {/* Header */}
         <div className="px-5 pt-14 pb-4 flex items-center justify-between">
           <h2 style={{ color: textPrimary }}>Личный кабинет</h2>
-          <motion.button
-            whileTap={{ scale: 0.85 }}
-            onClick={onLogout}
-            className="w-10 h-10 rounded-full flex items-center justify-center"
-            style={{ background: cardBg, border: cardBorder }}
-          >
-            <LogOut size={18} color={textSecondary} />
-          </motion.button>
+          <motion.button whileTap={{ scale: 0.85 }} onClick={onLogout} className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: cardBg, border: cardBorder }}><LogOut size={18} color={textSecondary} /></motion.button>
         </div>
 
-        {/* Profile card */}
         <div className="px-5 mb-6">
           <div className="rounded-3xl p-5" style={{ background: cardBg, border: cardBorder }}>
             {editingProfile ? (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                {/* Avatar */}
-                <div className="flex justify-center mb-4">
-                  <div className="relative">
-                    <img
-                      src={organizer.avatar}
-                      alt=""
-                      className="w-20 h-20 rounded-full object-cover"
-                    />
-                    <div
-                      className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center"
-                      style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)" }}
-                    >
-                      <Camera size={14} color="#fff" />
-                    </div>
-                  </div>
-                </div>
-                <InputField label="Название" value={profileName} onChange={setProfileName} placeholder="Название бъекта" />
-                <InputField label="Описание" value={profileDesc} onChange={setProfileDesc} placeholder="Описание" multiline />
-                <InputField label="Телефон" value={profilePhone} onChange={setProfilePhone} placeholder="+7 (___) ___-__-__" />
-                <InputField label="Email" value={profileEmail} onChange={setProfileEmail} placeholder="email@example.com" />
-                <InputField label="Сайт" value={profileWebsite} onChange={setProfileWebsite} placeholder="example.com" />
-                <div className="flex gap-3 mt-2">
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setEditingProfile(false)}
-                    className="flex-1 py-3 rounded-xl"
-                    style={{ background: cardBg, border: cardBorder, color: textSecondary, fontSize: 14 }}
-                  >
-                    Отмена
-                  </motion.button>
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setEditingProfile(false)}
-                    className="flex-1 py-3 rounded-xl text-white flex items-center justify-center gap-2"
-                    style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)", fontSize: 14 }}
-                  >
-                    <Save size={14} /> Сохранить
-                  </motion.button>
+                <div className="flex justify-center mb-4"><div className="relative"><img src={p.avatar} alt="" className="w-20 h-20 rounded-full object-cover" /><div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)" }}><Camera size={14} color="#fff" /></div></div></div>
+                <InputField {...commonInputProps} label="Название" value={p.name} onChange={(v: string) => setLocalProfile({ ...p, name: v })} placeholder="Horizon Adventures" />
+                <InputField {...commonInputProps} label="Описание" value={p.bio} onChange={(v: string) => setLocalProfile({ ...p, bio: v })} placeholder="О компании" multiline />
+                <InputField {...commonInputProps} label="Телефон" value={p.phone} onChange={(v: string) => setLocalProfile({ ...p, phone: v })} placeholder="+7 (900) 123-45-67" />
+                <div className="flex gap-3 mt-4">
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={cancelEditing} className="flex-1 py-3 rounded-xl" style={{ background: cardBg, border: cardBorder, color: textSecondary, fontSize: 14 }}>Отмена</motion.button>
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={saveProfileLocally} className="flex-1 py-3 rounded-xl text-white flex items-center justify-center gap-2" style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)", fontSize: 14 }}><Save size={14} /> Сохранить</motion.button>
                 </div>
               </motion.div>
             ) : (
               <>
                 <div className="flex items-start gap-4">
-                  <img
-                    src={organizer.avatar}
-                    alt=""
-                    className="w-16 h-16 rounded-full object-cover flex-shrink-0"
-                  />
+                  <img src={p.avatar} alt="" className="w-16 h-16 rounded-full object-cover flex-shrink-0" style={{ border: "2px solid #FF6B35" }} />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="truncate" style={{ color: textPrimary }}>{profileName}</h3>
-                      <div className="flex items-center gap-1">
-                        <Star size={12} fill="#FFB800" color="#FFB800" />
-                        <span style={{ fontSize: 13, color: textPrimary }}>{organizer.rating}</span>
-                      </div>
-                    </div>
-                    <p style={{ fontSize: 13, lineHeight: 1.5, color: textSecondary }} className="mb-3">
-                      {profileDesc}
-                    </p>
-                    {/* Contact info */}
+                    <div className="flex items-center gap-2 mb-1"><h3 className="truncate" style={{ color: textPrimary }}>{p.name}</h3><div className="flex items-center gap-1"><Star size={12} fill="#FFB800" color="#FFB800" /><span style={{ fontSize: 13, color: textPrimary }}>4.9</span></div></div>
+                    <p style={{ fontSize: 13, lineHeight: 1.5, color: textSecondary }} className="mb-3">{p.bio}</p>
                     <div className="space-y-1.5">
-                      {profilePhone && (
-                        <div className="flex items-center gap-2">
-                          <Phone size={12} color={textMuted} />
-                          <span style={{ fontSize: 12, color: textSecondary }}>{profilePhone}</span>
-                        </div>
-                      )}
-                      {profileEmail && (
-                        <div className="flex items-center gap-2">
-                          <Mail size={12} color={textMuted} />
-                          <span style={{ fontSize: 12, color: textSecondary }}>{profileEmail}</span>
-                        </div>
-                      )}
-                      {profileWebsite && (
-                        <div className="flex items-center gap-2">
-                          <Globe size={12} color={textMuted} />
-                          <span style={{ fontSize: 12, color: textSecondary }}>{profileWebsite}</span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2"><Phone size={12} color={textMuted} /><span style={{ fontSize: 12, color: textSecondary }}>{p.phone || "+7 (900) 123-45-67"}</span></div>
+                      <div className="flex items-center gap-2"><Mail size={12} color={textMuted} /><span style={{ fontSize: 12, color: textSecondary }}>{p.email}</span></div>
                     </div>
                   </div>
                 </div>
-                {/* Stats */}
                 <div className="flex gap-4 mt-4 pt-4" style={{ borderTop: `1px solid ${divider}` }}>
-                  <div className="flex-1 text-center">
-                    <p style={{ color: textPrimary, fontSize: 18 }}>{myExcursions.length}</p>
-                    <p style={{ fontSize: 11, color: textMuted }}>Экскурсий</p>
-                  </div>
-                  <div className="flex-1 text-center">
-                    <p style={{ color: textPrimary, fontSize: 18 }}>{myPosts.length}</p>
-                    <p style={{ fontSize: 11, color: textMuted }}>Постов</p>
-                  </div>
-                  <div className="flex-1 text-center">
-                    <p style={{ color: textPrimary, fontSize: 18 }}>{organizer.followers.toLocaleString()}</p>
-                    <p style={{ fontSize: 11, color: textMuted }}>Подписчиков</p>
-                  </div>
+                  <div className="flex-1 text-center"><p style={{ color: textPrimary, fontSize: 18 }}>{myExcursions.length}</p><p style={{ fontSize: 11, color: textMuted }}>Экскурсий</p></div>
+                  <div className="flex-1 text-center"><p style={{ color: textPrimary, fontSize: 18 }}>{myPosts.length}</p><p style={{ fontSize: 11, color: textMuted }}>Постов</p></div>
+                  <div className="flex-1 text-center"><p style={{ color: textPrimary, fontSize: 18 }}>{subs?.length || 0}</p><p style={{ fontSize: 11, color: textMuted }}>Подписчиков</p></div>
                 </div>
-                {/* Edit button */}
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => setEditingProfile(true)}
-                  className="w-full mt-4 py-3 rounded-xl flex items-center justify-center gap-2"
-                  style={{ background: cardBg, border: cardBorder, color: textSecondary, fontSize: 14 }}
-                >
-                  <Edit3 size={14} /> Редактировать профиль
-                </motion.button>
+                <motion.button whileTap={{ scale: 0.97 }} onClick={startEditing} className="w-full mt-4 py-3 rounded-xl flex items-center justify-center gap-2" style={{ background: cardBg, border: cardBorder, color: textSecondary, fontSize: 14 }}><Edit3 size={14} /> Редактировать профиль</motion.button>
               </>
             )}
           </div>
         </div>
 
-        {/* Tabs */}
         <div className="px-5 mb-4">
           <div className="flex gap-2 p-1 rounded-2xl" style={{ background: cardBg, border: cardBorder }}>
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className="flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5"
-                style={{
-                  background: activeTab === tab.key ? "linear-gradient(135deg, #FF6B35, #FF8F5E)" : "transparent",
-                  color: activeTab === tab.key ? "#fff" : textSecondary,
-                  fontSize: 13,
-                }}
-              >
-                {tab.label}
-                <span
-                  className="px-1.5 py-0.5 rounded-full"
-                  style={{
-                    fontSize: 11,
-                    background: activeTab === tab.key ? "rgba(255,255,255,0.2)" : (isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)"),
-                    color: activeTab === tab.key ? "#fff" : textMuted,
-                  }}
-                >
-                  {tab.count}
-                </span>
+            {["excursions", "posts", "reviews"].map((key) => (
+              <button key={key} onClick={() => setActiveTab(key as Tab)} className="flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5" style={{ background: activeTab === key ? "linear-gradient(135deg, #FF6B35, #FF8F5E)" : "transparent", color: activeTab === key ? "#fff" : textSecondary, fontSize: 13 }}>
+                {key === "excursions" ? "Экскурсии" : key === "posts" ? "Посты" : "Отзывы"}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Tab content */}
         <div className="px-5">
           <AnimatePresence mode="wait">
-            {/* EXCURSIONS TAB */}
             {activeTab === "excursions" && (
               <motion.div key="exc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => openExcEditor()}
-                  className="w-full py-3 rounded-2xl flex items-center justify-center gap-2 mb-4"
-                  style={{ background: "rgba(255,107,53,0.1)", border: "1px solid rgba(255,107,53,0.2)", color: "#FF6B35", fontSize: 14 }}
-                >
-                  <Plus size={18} /> Добавить экскурсию
-                </motion.button>
+                <motion.button whileTap={{ scale: 0.97 }} onClick={() => { setEditingExcId(null); setExcForm({ title: "", price: "", duration: "", description: "" }); setShowExcEditor(true); }} className="w-full py-3 rounded-2xl flex items-center justify-center gap-2 mb-4" style={{ background: "rgba(255,107,53,0.1)", border: "1px solid rgba(255,107,53,0.2)", color: "#FF6B35", fontSize: 14 }}><Plus size={18} /> Добавить экскурсию</motion.button>
                 <div className="space-y-3">
                   {myExcursions.map((exc) => (
-                    <div
-                      key={exc.id}
-                      className="rounded-2xl overflow-hidden"
-                      style={{ background: cardBg, border: cardBorder }}
-                    >
-                      <div className="flex">
-                        <img src={exc.image} alt="" className="w-24 h-24 object-cover flex-shrink-0" />
-                        <div className="flex-1 p-3 min-w-0">
-                          <p className="truncate" style={{ fontSize: 14, color: textPrimary }}>{exc.title}</p>
-                          <div className="flex items-center gap-1 mt-1">
-                            <MapPin size={11} color={textMuted} />
-                            <span className="truncate" style={{ fontSize: 11, color: textMuted }}>{exc.location}</span>
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span style={{ fontSize: 13, color: "#FF6B35" }}>{exc.price}</span>
-                            <span style={{ fontSize: 11, color: textMuted }}>{exc.duration}</span>
-                          </div>
-                          <div className="flex items-center gap-1 mt-1">
-                            <Star size={10} fill="#FFB800" color="#FFB800" />
-                            <span style={{ fontSize: 12, color: textSecondary }}>{exc.rating}</span>
-                            <span style={{ fontSize: 11, color: textMuted }}>({exc.reviewCount})</span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col justify-center gap-2 pr-3">
-                          <motion.button
-                            whileTap={{ scale: 0.85 }}
-                            onClick={() => openExcEditor(exc)}
-                            className="w-8 h-8 rounded-full flex items-center justify-center"
-                            style={{ background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
-                          >
-                            <Edit3 size={14} color={textSecondary} />
-                          </motion.button>
-                          <motion.button
-                            whileTap={{ scale: 0.85 }}
-                            onClick={() => deleteExcursion(exc.id)}
-                            className="w-8 h-8 rounded-full flex items-center justify-center"
-                            style={{ background: "rgba(255,59,48,0.08)" }}
-                          >
-                            <Trash2 size={14} color="#FF3B30" />
-                          </motion.button>
-                        </div>
-                      </div>
+                    <div key={exc.id} className="rounded-2xl overflow-hidden cursor-pointer" onClick={() => openEditExcursion(exc)} style={{ background: cardBg, border: cardBorder }}>
+                      <div className="flex"><img src={exc.cover_image_url || IMAGES.santorini} alt="" className="w-24 h-24 object-cover flex-shrink-0" /><div className="flex-1 p-3 min-w-0"><p className="truncate" style={{ fontSize: 14, color: textPrimary }}>{exc.title}</p><div className="flex items-center gap-2 mt-1"><span style={{ fontSize: 13, color: "#FF6B35" }}>₽{exc.price_amount}</span><span style={{ fontSize: 11, color: textMuted }}>{exc.duration_minutes} мин</span></div></div><div className="flex items-center pr-4"><Edit3 size={16} color={textMuted} /></div></div>
                     </div>
                   ))}
                 </div>
               </motion.div>
             )}
-
-            {/* POSTS TAB */}
             {activeTab === "posts" && (
               <motion.div key="posts" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => openPostEditor()}
-                  className="w-full py-3 rounded-2xl flex items-center justify-center gap-2 mb-4"
-                  style={{ background: "rgba(255,107,53,0.1)", border: "1px solid rgba(255,107,53,0.2)", color: "#FF6B35", fontSize: 14 }}
-                >
-                  <Plus size={18} /> Новый пост
-                </motion.button>
+                <motion.button whileTap={{ scale: 0.97 }} onClick={() => setShowPostEditor(true)} className="w-full py-3 rounded-2xl flex items-center justify-center gap-2 mb-4" style={{ background: "rgba(255,107,53,0.1)", border: "1px solid rgba(255,107,53,0.2)", color: "#FF6B35", fontSize: 14 }}><Plus size={18} /> Новый пост</motion.button>
                 <div className="space-y-3">
                   {myPosts.map((post) => (
-                    <div
-                      key={post.id}
-                      className="rounded-2xl overflow-hidden"
-                      style={{ background: cardBg, border: cardBorder }}
-                    >
-                      <img src={post.image} alt="" className="w-full h-40 object-cover" />
-                      <div className="p-4">
-                        <p style={{ fontSize: 14, lineHeight: 1.5, color: textPrimary }} className="mb-2">
-                          {post.description}
-                        </p>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <span style={{ fontSize: 12, color: textMuted }}>{post.likes} likes</span>
-                            <motion.button
-                              whileTap={{ scale: 0.95 }}
-                              onClick={() => setExpandedPostComments(expandedPostComments === post.id ? null : post.id)}
-                              className="flex items-center gap-1"
-                            >
-                              <MessageSquare size={12} color={expandedPostComments === post.id ? "#FF6B35" : textMuted} />
-                              <span style={{ fontSize: 12, color: expandedPostComments === post.id ? "#FF6B35" : textMuted }}>
-                                {post.comments} comments
-                              </span>
-                            </motion.button>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <motion.button
-                              whileTap={{ scale: 0.85 }}
-                              onClick={() => openPostEditor(post)}
-                              className="w-8 h-8 rounded-full flex items-center justify-center"
-                              style={{ background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" }}
-                            >
-                              <Edit3 size={14} color={textSecondary} />
-                            </motion.button>
-                            <motion.button
-                              whileTap={{ scale: 0.85 }}
-                              onClick={() => deletePost(post.id)}
-                              className="w-8 h-8 rounded-full flex items-center justify-center"
-                              style={{ background: "rgba(255,59,48,0.08)" }}
-                            >
-                              <Trash2 size={14} color="#FF3B30" />
-                            </motion.button>
-                          </div>
-                        </div>
-
-                        {/* Expanded comments */}
-                        <AnimatePresence>
-                          {expandedPostComments === post.id && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.25 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)"}` }}>
-                                {mockComments.filter(c => c.postId === post.id).length > 0 ? (
-                                  mockComments.filter(c => c.postId === post.id).map(comment => (
-                                    <div key={comment.id} className="flex gap-2.5 mb-3">
-                                      <div
-                                        className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center"
-                                        style={{
-                                          background: isDark
-                                            ? "linear-gradient(135deg, rgba(255,107,53,0.15), rgba(139,92,246,0.15))"
-                                            : "linear-gradient(135deg, rgba(255,107,53,0.1), rgba(139,92,246,0.1))",
-                                        }}
-                                      >
-                                        <span style={{ fontSize: 11, color: textPrimary }}>{comment.author.charAt(0)}</span>
-                                      </div>
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-1.5">
-                                          <span style={{ fontSize: 12, color: textPrimary }}>{comment.author}</span>
-                                          <span style={{ fontSize: 10, color: textMuted }}>{comment.timeAgo}</span>
-                                        </div>
-                                        <p style={{ fontSize: 13, color: textSecondary, lineHeight: 1.4, marginTop: 1 }}>
-                                          {comment.text}
-                                        </p>
-                                        <span style={{ fontSize: 11, color: textMuted }}>♥ {comment.likes}</span>
-                                      </div>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <p style={{ fontSize: 13, color: textMuted, textAlign: "center", paddingBottom: 4 }}>
-                                    Нет комментариев
-                                  </p>
-                                )}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
+                    <div key={post.id} className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: cardBorder }}>
+                      <img src={post.cover_image_url} alt="" className="w-full h-40 object-cover" />
+                      <div className="p-4"><p style={{ fontSize: 14, color: textPrimary }}>{post.content}</p></div>
                     </div>
                   ))}
                 </div>
               </motion.div>
             )}
-
-            {/* REVIEWS TAB */}
             {activeTab === "reviews" && (
               <motion.div key="reviews" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <div className="space-y-3">
-                  {reviews.map((review) => (
-                    <div
-                      key={review.id}
-                      className="p-4 rounded-2xl"
-                      style={{ background: cardBg, border: cardBorder }}
-                    >
+                  {(allReviews || []).map((review: any) => (
+                    <div key={review.id} className="p-4 rounded-2xl" style={{ background: cardBg, border: cardBorder }}>
                       <div className="flex items-center justify-between mb-2">
-                        <span style={{ fontSize: 14, color: textPrimary }}>{review.author}</span>
-                        <div className="flex gap-0.5">
-                          {Array.from({ length: 5 }).map((_, i) => (
-                            <Star
-                              key={i}
-                              size={12}
-                              fill={i < review.rating ? "#FFB800" : "transparent"}
-                              color={i < review.rating ? "#FFB800" : textMuted}
-                            />
-                          ))}
-                        </div>
+                        <span style={{ fontSize: 14, color: textPrimary }}>Клиент #{review.user_id}</span>
+                        <div className="flex gap-0.5">{Array.from({ length: 5 }).map((_, i) => (<Star key={i} size={12} fill={i < review.rating ? "#FFB800" : "transparent"} color={i < review.rating ? "#FFB800" : textMuted} />))}</div>
                       </div>
                       <p style={{ fontSize: 14, lineHeight: 1.6, color: textSecondary }}>{review.text}</p>
-                      <p className="mt-2" style={{ fontSize: 12, color: textMuted }}>{review.date}</p>
                     </div>
                   ))}
-                  {reviews.length === 0 && (
-                    <div className="py-12 text-center">
-                      <MessageSquare size={32} color={textMuted} className="mx-auto mb-3" />
-                      <p style={{ color: textMuted, fontSize: 14 }}>Пока нет отзывов</p>
-                    </div>
-                  )}
+                  {(!allReviews || allReviews.length === 0) && <div className="py-12 text-center"><MessageSquare size={32} color={textMuted} className="mx-auto mb-3" /><p style={{ color: textMuted, fontSize: 14 }}>Пока нет отзывов</p></div>}
                 </div>
               </motion.div>
             )}
@@ -539,206 +283,67 @@ export function OrganizerDashboard({ organizer, onLogout, isDark = true }: Organ
         </div>
       </div>
 
-      {/* Excursion editor modal */}
+      {/* Excursion Editor Modal */}
       <AnimatePresence>
         {showExcEditor && (
           <>
-            <motion.div
-              className="fixed inset-0 z-[60]"
-              style={{ background: "rgba(0,0,0,0.7)" }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowExcEditor(false)}
-            />
-            <motion.div
-              className="fixed inset-x-0 bottom-0 z-[61] rounded-t-3xl"
-              style={{
-                background: isDark ? "rgba(18,18,28,0.98)" : "rgba(255,255,255,0.98)",
-                backdropFilter: "blur(30px)",
-                border: cardBorder,
-                maxHeight: "85vh",
-              }}
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            >
-              <div className="w-10 h-1 rounded-full mx-auto mt-3" style={{ background: isDark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.12)" }} />
-              <div className="px-5 pt-4 pb-2 flex items-center justify-between">
-                <h3 style={{ color: textPrimary }}>{editingExc ? "Редактировать" : "Новая экскурсия"}</h3>
-                <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowExcEditor(false)}>
-                  <X size={20} color={textMuted} />
-                </motion.button>
+            <motion.div className="fixed inset-0 z-[60]" style={{ background: "rgba(0,0,0,0.7)" }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowExcEditor(false)} />
+            <motion.div className="fixed inset-x-0 bottom-0 z-[61] rounded-t-3xl p-5" style={{ background: isDark ? "rgba(18,18,28,0.98)" : "rgba(255,255,255,0.98)", backdropFilter: "blur(30px)", border: cardBorder }}>
+              <div className="flex items-center justify-between mb-4"><h3 style={{ color: textPrimary }}>{editingExcId ? "Редактировать" : "Новая экскурсия"}</h3><button onClick={() => setShowExcEditor(false)}><X size={20} color={textMuted} /></button></div>
+              <InputField {...commonInputProps} label="Название" value={excForm.title} onChange={(v: string) => setExcForm({ ...excForm, title: v })} placeholder="Заголовок" />
+              <div className="flex gap-3">
+                <InputField {...commonInputProps} label="Цена (₽)" value={excForm.price} onChange={(v: string) => setExcForm({ ...excForm, price: v })} placeholder="3000" type="number" />
+                <InputField {...commonInputProps} label="Длительность (мин)" value={excForm.duration} onChange={(v: string) => setExcForm({ ...excForm, duration: v })} placeholder="60" type="number" />
               </div>
-              <div className="px-5 pb-8 overflow-y-auto" style={{ maxHeight: "70vh", scrollbarWidth: "none" }}>
-                <InputField label="Название" value={excForm.title} onChange={(v) => setExcForm({ ...excForm, title: v })} placeholder="Название экскурсии" />
-                <InputField label="Локация" value={excForm.location} onChange={(v) => setExcForm({ ...excForm, location: v })} placeholder="Город, регион" />
-                <div className="flex gap-3">
-                  <div className="flex-1">
-                    <InputField label="Цена" value={excForm.price} onChange={(v) => setExcForm({ ...excForm, price: v })} placeholder="₽3 000" />
-                  </div>
-                  <div className="flex-1">
-                    <InputField label="Длительность" value={excForm.duration} onChange={(v) => setExcForm({ ...excForm, duration: v })} placeholder="3 часа" />
-                  </div>
-                </div>
-                <InputField label="Категория" value={excForm.category} onChange={(v) => setExcForm({ ...excForm, category: v })} placeholder="Природа, Гастро..." />
-                <InputField label="Описание" value={excForm.description} onChange={(v) => setExcForm({ ...excForm, description: v })} placeholder="Расскажите об экскурсии..." multiline />
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  onClick={saveExcursion}
-                  className="w-full py-4 rounded-2xl text-white mt-2"
-                  style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)", boxShadow: "0 8px 30px rgba(255,107,53,0.3)" }}
-                >
-                  {editingExc ? "Сохранить изменения" : "Создать экскурсию"}
-                </motion.button>
-              </div>
+              <InputField {...commonInputProps} label="Описание" value={excForm.description} onChange={(v: string) => setExcForm({ ...excForm, description: v })} placeholder="О чем экскурсия?" multiline />
+              <motion.button whileTap={{ scale: 0.97 }} onClick={handleSaveExcursion} disabled={createExcursionMutation.isPending || updateExcursionMutation.isPending} className="w-full py-4 rounded-2xl text-white mt-2" style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)" }}>{(createExcursionMutation.isPending || updateExcursionMutation.isPending) ? "Сохранение..." : "Сохранить"}</motion.button>
             </motion.div>
           </>
         )}
       </AnimatePresence>
 
-      {/* Post editor modal */}
+      {/* Post Editor Modal */}
       <AnimatePresence>
         {showPostEditor && (
           <>
-            <motion.div
-              className="fixed inset-0 z-[60]"
-              style={{ background: "rgba(0,0,0,0.7)" }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowPostEditor(false)}
-            />
-            <motion.div
-              className="fixed inset-x-0 bottom-0 z-[61] rounded-t-3xl"
-              style={{
-                background: isDark ? "rgba(18,18,28,0.98)" : "rgba(255,255,255,0.98)",
-                backdropFilter: "blur(30px)",
-                border: cardBorder,
-              }}
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            >
-              <div className="w-10 h-1 rounded-full mx-auto mt-3" style={{ background: isDark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.12)" }} />
-              <div className="px-5 pt-4 pb-2 flex items-center justify-between">
-                <h3 style={{ color: textPrimary }}>{editingPost ? "Редактировать пост" : "Новый пост"}</h3>
-                <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowPostEditor(false)}>
-                  <X size={20} color={textMuted} />
-                </motion.button>
-              </div>
-              <div className="px-5 pb-8">
-                {/* Generate button */}
-                {!editingPost && (
-                  <>
-                    <div className="mb-3">
-                      <label className="block mb-1.5" style={{ fontSize: 12, color: textMuted }}>Промпт для генерации</label>
-                      <div className="flex gap-2">
-                        <input
-                          value={genPrompt}
-                          onChange={(e) => setGenPrompt(e.target.value)}
-                          placeholder="Напр: пост про закат на море..."
-                          className="flex-1 px-4 py-3 rounded-xl outline-none"
-                          style={{ background: inputBg, border: `1px solid ${inputBorder}`, color: isDark ? "#fff" : "#222", fontSize: 14 }}
-                        />
-                        <motion.button
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => {
-                            setGenerating(true);
-                            const prompt = genPrompt.trim().toLowerCase();
-                            const themed: Record<string, string[]> = {
-                              море: [
-                                `🌊 Закат на Чёрном море — лучшая награда после дня экскурсий! Волны, солёный бриз и бесконечный горизонт.\n\n📍 ${profileName}\n#путешествия #закат #черноеморе`,
-                                `🏖 Сегодня море подарило нам идеальный штиль. Гости наслаждались каякингом и дельфинами у берега!\n\n#море #анапа #${profileName.replace(/\s/g, "")}`,
-                              ],
-                              гор: [
-                                `🏔 Сегодня группа покорила вершину! Кавказский хребет, бирюзовые озёра и альпийские луга — каждый поход уникален.\n\n#${profileName.replace(/\s/g, "")} #горы #природа`,
-                                `⛰ Каньон на рассвете — тишина, туман и первые лучи солнца создают магию.\n\n#каньон #рассвет #горы`,
-                              ],
-                              вин: [
-                                `🍷 Дегустация молодого вина в окружении виноградников — атмосфера, которую невозможно передать словами!\n\nЗабронируйте винный тур 🔗\n#винныйтур #гастро #кубань`,
-                                `🍇 Виноградники на закате — это отдельный вид искусства. Наш гастро-тур раскрывает все секреты кубанского виноделия.\n\n#вино #кубань #${profileName.replace(/\s/g, "")}`,
-                              ],
-                              дельфин: [
-                                `🐬 Встреча с дельфинами — всегда неожиданность и восторг! Природа — лучший режиссёр.\n\n#дельфины #море #анапа`,
-                              ],
-                              гастро: [
-                                `🍽 Кубанская кухня — это целая вселенная вкусов. Сегодня гости попробовали домашний сыр, мёд с горных пасек и свежий лаваш из тандыра!\n\n#гастро #кубань #${profileName.replace(/\s/g, "")}`,
-                              ],
-                            };
-                            let pool: string[] = [];
-                            if (prompt) {
-                              for (const [key, arr] of Object.entries(themed)) {
-                                if (prompt.includes(key)) pool.push(...arr);
-                              }
-                            }
-                            if (pool.length === 0) {
-                              pool = [
-                                `🏔 Сегодня наша группа покорила новый маршрут! Невероятные виды!\n\n#${profileName.replace(/\s/g, "")} #горы #природа`,
-                                `🌊 Закат на Чёрном море — лучшая награда!\n\n📍 ${profileName}\n#путешествия #закат`,
-                                `🍷 Дегустация вина в окружении виноградников!\n\n#винныйтур #гастро #кубань`,
-                                `⛰ Каньон на рассвете — тишина и магия.\n\n#каньон #рассвет`,
-                                `🐬 Встреча с дельфинами — восторг!\n\n#дельфины #море`,
-                              ];
-                            }
-                            if (prompt) {
-                              const generated = pool[Math.floor(Math.random() * pool.length)];
-                              const withContext = prompt
-                                ? `${generated}\n\n✨ По вашему запросу: «${genPrompt.trim()}»`
-                                : generated;
-                              setTimeout(() => {
-                                setPostForm({ description: withContext });
-                                setGenerating(false);
-                              }, 800);
-                            } else {
-                              setTimeout(() => {
-                                setPostForm({ description: pool[Math.floor(Math.random() * pool.length)] });
-                                setGenerating(false);
-                              }, 600);
-                            }
-                          }}
-                          disabled={generating}
-                          className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
-                          style={{
-                            background: "linear-gradient(135deg, rgba(139,92,246,0.15), rgba(255,107,53,0.15))",
-                            border: "1px solid rgba(139,92,246,0.25)",
-                          }}
-                        >
-                          {generating ? (
-                            <motion.div
-                              className="w-4 h-4 border-2 border-purple-300/30 border-t-purple-400 rounded-full"
-                              animate={{ rotate: 360 }}
-                              transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-                            />
-                          ) : (
-                            <Sparkles size={18} color="#A78BFA" />
-                          )}
-                        </motion.button>
-                      </div>
-                    </div>
-                  </>
-                )}
+            <motion.div className="fixed inset-0 z-[60]" style={{ background: "rgba(0,0,0,0.7)" }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowPostEditor(false)} />
+            <motion.div className="fixed inset-x-0 bottom-0 z-[61] rounded-t-3xl p-5" style={{ background: isDark ? "rgba(18,18,28,0.98)" : "rgba(255,255,255,0.98)", backdropFilter: "blur(30px)", border: cardBorder }}>
+              <div className="flex items-center justify-between mb-4"><h3 style={{ color: textPrimary }}>Новый пост</h3><button onClick={() => { setShowPostEditor(false); setAiPrompt(""); }}><X size={20} color={textMuted} /></button></div>
 
-                {/* Image placeholder */}
-                <div
-                  className="w-full h-40 rounded-2xl flex items-center justify-center mb-4 cursor-pointer"
-                  style={{ background: cardBg, border: `2px dashed ${inputBorder}` }}
-                >
-                  <div className="text-center">
-                    <Image size={28} color={textMuted} className="mx-auto mb-2" />
-                    <p style={{ fontSize: 13, color: textMuted }}>Добавить фото</p>
-                  </div>
+              {/* AI блок */}
+              <div className="mb-4 p-3 rounded-2xl" style={{ background: "rgba(255,107,53,0.07)", border: "1px solid rgba(255,107,53,0.2)" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles size={14} color="#FF8F5E" />
+                  <span style={{ fontSize: 13, color: "#FF8F5E" }}>Сгенерировать с ИИ</span>
                 </div>
-                <InputField
-                  label="Описание"
-                  value={postForm.description}
-                  onChange={(v) => setPostForm({ ...postForm, description: v })}
-                  placeholder="Напишите что-нибудь..."
-                  multiline
-                />
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  onClick={savePost}
-                  className="w-full py-4 rounded-2xl text-white mt-2"
-                  style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)", boxShadow: "0 8px 30px rgba(255,107,53,0.3)" }}
-                >
-                  {editingPost ? "Сохранить" : "Опубликовать"}
-                </motion.button>
+                <div className="flex gap-2">
+                  <input
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="О чём написать пост?"
+                    className="flex-1 px-3 py-2 rounded-xl outline-none"
+                    style={{ background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)", border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`, color: isDark ? "#fff" : "#222", fontSize: 13 }}
+                    onKeyDown={(e) => e.key === "Enter" && handleGenerateWithAi()}
+                  />
+                  <motion.button
+                    whileTap={{ scale: 0.9 }}
+                    onClick={handleGenerateWithAi}
+                    disabled={aiLoading || !aiPrompt.trim()}
+                    className="px-4 py-2 rounded-xl flex items-center gap-1.5"
+                    style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)", opacity: (!aiPrompt.trim() || aiLoading) ? 0.5 : 1 }}
+                  >
+                    {aiLoading
+                      ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
+                      : <Sparkles size={14} color="#fff" />
+                    }
+                    <span style={{ fontSize: 13, color: "#fff" }}>{aiLoading ? "..." : "Создать"}</span>
+                  </motion.button>
+                </div>
               </div>
+
+              <InputField {...commonInputProps} label="Заголовок" value={postForm.title} onChange={(v: string) => setPostForm({ ...postForm, title: v })} placeholder="Заголовок" />
+              <InputField {...commonInputProps} label="Текст поста" value={postForm.content} onChange={(v: string) => setPostForm({ ...postForm, content: v })} placeholder="О чем хотите рассказать?" multiline />
+              <motion.button whileTap={{ scale: 0.97 }} onClick={handleCreatePost} disabled={createPostMutation.isPending} className="w-full py-4 rounded-2xl text-white mt-2" style={{ background: "linear-gradient(135deg, #FF6B35, #FF8F5E)" }}>{createPostMutation.isPending ? "Публикация..." : "Опубликовать"}</motion.button>
             </motion.div>
           </>
         )}
